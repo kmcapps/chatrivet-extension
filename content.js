@@ -102,6 +102,11 @@
     return normalizeText(link?.textContent).slice(0, TITLE_LIMIT) || '無題のチャット';
   }
 
+  function handleAsyncError(error) {
+    if (String(error?.message ?? error) === 'Extension context invalidated.') return;
+    console.error('ChatRivet: unexpected asynchronous error.', error);
+  }
+
   function createButton(label, className, onClick, title) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -109,7 +114,14 @@
     button.textContent = label;
     button.title = title;
     button.setAttribute('aria-label', title);
-    button.addEventListener('click', onClick);
+    button.addEventListener('click', (event) => {
+      try {
+        const result = onClick(event);
+        if (result && typeof result.then === 'function') result.catch(handleAsyncError);
+      } catch (error) {
+        handleAsyncError(error);
+      }
+    });
     return button;
   }
 
@@ -175,7 +187,7 @@
     window.clearTimeout(renderTimer);
     renderTimer = window.setTimeout(() => {
       lastUrl = location.href;
-      render().catch(() => {});
+      render().catch(handleAsyncError);
     }, 120);
   }
 
