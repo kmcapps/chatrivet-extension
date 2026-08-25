@@ -1,4 +1,4 @@
-# ChatDock（試作版）
+# ChatRivet（試作版）
 
 ChatGPT の左サイドバーに、ブラウザ内だけで管理する独自ピン留め一覧を追加する Chrome 拡張です。対象は `https://chatgpt.com/*` のみで、会話本文を保存・送信しません。
 

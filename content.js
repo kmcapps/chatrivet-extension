@@ -130,7 +130,7 @@
     const root = existing || document.createElement('section');
     root.id = ROOT_ID;
     root.className = 'chatdock-root';
-    root.setAttribute('aria-label', 'ChatDock のピン留めチャット');
+    root.setAttribute('aria-label', 'ChatRivet のピン留めチャット');
     if (root.parentElement !== target.parent || root.nextElementSibling !== target.before) target.parent.insertBefore(root, target.before);
 
     const currentChatId = getChatId();
@@ -141,7 +141,7 @@
     header.className = 'chatdock-header';
     const heading = document.createElement('span');
     heading.className = 'chatdock-heading';
-    heading.textContent = 'ChatDock';
+    heading.textContent = 'ChatRivet';
     header.appendChild(heading);
     if (currentChatId && !pins.some((pin) => pin.id === currentChatId)) {
       header.appendChild(createButton('＋', 'chatdock-add', async () => {
