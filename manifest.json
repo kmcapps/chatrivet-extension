@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "ChatDock",
+  "version": "0.1.0",
+  "description": "ChatGPT のチャットを上限なく固定するローカル専用のピン留め機能。",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
