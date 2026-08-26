@@ -1,16 +1,22 @@
 .chatdock-root { color: inherit; font: inherit; margin: .25rem 0; padding: 0 .5rem; }
 .chatdock-header { align-items: center; display: flex; justify-content: space-between; min-height: 2rem; padding: 0 .5rem; }
 .chatdock-heading { font-size: .75rem; font-weight: 600; opacity: .7; }
-.chatdock-add, .chatdock-remove, .chatdock-color-button, .chatdock-color-option, .chatdock-color-clear { appearance: none; background: transparent; border: 0; border-radius: .375rem; color: inherit; cursor: pointer; font: inherit; line-height: 1; }
+.chatdock-add, .chatdock-remove, .chatdock-color-button, .chatdock-color-option, .chatdock-color-clear, .chatdock-drag-handle { appearance: none; background: transparent; border: 0; border-radius: .375rem; color: inherit; cursor: pointer; font: inherit; line-height: 1; }
 .chatdock-add { font-size: 1.25rem; height: 1.75rem; opacity: .65; width: 1.75rem; }
-.chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible { background: rgba(127, 127, 127, .16); opacity: 1; outline: none; }
-@supports (background: color-mix(in srgb, currentColor 10%, transparent)) { .chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible { background: color-mix(in srgb, currentColor 10%, transparent); } }
+.chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-drag-handle:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible, .chatdock-drag-handle:focus-visible { background: rgba(127, 127, 127, .16); opacity: 1; outline: none; }
+@supports (background: color-mix(in srgb, currentColor 10%, transparent)) { .chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-drag-handle:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible, .chatdock-drag-handle:focus-visible { background: color-mix(in srgb, currentColor 10%, transparent); } }
 .chatdock-row { align-items: center; border-radius: .5rem; display: flex; gap: .25rem; min-height: 2.25rem; padding-left: .5rem; position: relative; }
 .chatdock-row:hover, .chatdock-current { background: rgba(127, 127, 127, .12); }
 @supports (background: color-mix(in srgb, currentColor 8%, transparent)) { .chatdock-row:hover, .chatdock-current { background: color-mix(in srgb, currentColor 8%, transparent); } }
+.chatdock-row.chatdock-dragging { opacity: .55; }
+.chatdock-row.chatdock-drop-before::before { background: currentColor; content: ''; height: 2px; left: .5rem; opacity: .45; position: absolute; right: .25rem; top: -1px; }
+.chatdock-list { position: relative; }
+.chatdock-list.chatdock-drop-after::after { background: currentColor; bottom: -1px; content: ''; height: 2px; left: .5rem; opacity: .45; position: absolute; right: .25rem; }
 .chatdock-link { color: inherit; flex: 1; font-size: .875rem; min-width: 0; overflow: hidden; padding: .5rem 0; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-.chatdock-remove { font-size: 1rem; height: 1.75rem; margin-right: .25rem; opacity: 0; width: 1.75rem; }
+.chatdock-remove { flex: 0 0 1.75rem; font-size: 1rem; height: 1.75rem; margin-right: .25rem; opacity: 0; width: 1.75rem; }
 .chatdock-row:hover .chatdock-remove, .chatdock-remove:focus-visible { opacity: .65; }
+.chatdock-drag-handle { cursor: grab; flex: 0 0 1.25rem; font-size: 1rem; height: 1.75rem; padding: 0; width: 1.25rem; }
+.chatdock-dragging .chatdock-drag-handle { cursor: grabbing; }
 .chatdock-color-button { align-items: center; display: inline-flex; flex: 0 0 1.5rem; height: 1.75rem; justify-content: center; padding: 0; width: 1.5rem; }
 .chatdock-color-marker { border: 1px solid currentColor; border-radius: 50%; box-sizing: border-box; height: .625rem; opacity: .45; width: .625rem; }
 .chatdock-color-button[data-color] .chatdock-color-marker { background: var(--chatdock-color); border-color: var(--chatdock-color); border-radius: .125rem; height: .875rem; opacity: 1; width: .1875rem; }

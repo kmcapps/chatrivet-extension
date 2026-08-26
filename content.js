@@ -11,6 +11,8 @@
   let renderGeneration = 0;
   let lastUrl = location.href;
   let activeColorPickerId = null;
+  let dragState = null;
+  let renderPendingDuringDrag = false;
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -154,6 +156,114 @@
     scheduleRender();
   }
 
+  function movePinBefore(pins, draggedId, beforeId) {
+    const sourceIndex = pins.findIndex((pin) => pin.id === draggedId);
+    if (sourceIndex < 0 || draggedId === beforeId) return pins;
+    const next = pins.slice();
+    const [dragged] = next.splice(sourceIndex, 1);
+    if (beforeId == null) return [...next, dragged];
+    const targetIndex = next.findIndex((pin) => pin.id === beforeId);
+    if (targetIndex < 0) return pins;
+    next.splice(targetIndex, 0, dragged);
+    return next;
+  }
+
+  function getDragRow(id) {
+    return [...(dragState?.list.querySelectorAll('.chatdock-row') || [])].find((row) => row.dataset.chatdockPinId === id) || null;
+  }
+
+  function clearDragPreview() {
+    const list = dragState?.list;
+    if (!list) return;
+    list.classList.remove('chatdock-drop-after');
+    for (const row of list.querySelectorAll('.chatdock-dragging, .chatdock-drop-before')) {
+      row.classList.remove('chatdock-dragging', 'chatdock-drop-before');
+    }
+  }
+
+  function getDropBeforeId(clientY) {
+    if (!dragState) return null;
+    const rows = [...dragState.list.querySelectorAll('.chatdock-row')].filter((row) => row.dataset.chatdockPinId !== dragState.draggedId);
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) return row.dataset.chatdockPinId;
+    }
+    return null;
+  }
+
+  function updateDragPreview(clientY) {
+    if (!dragState) return;
+    dragState.beforeId = getDropBeforeId(clientY);
+    clearDragPreview();
+    getDragRow(dragState.draggedId)?.classList.add('chatdock-dragging');
+    if (dragState.beforeId == null) dragState.list.classList.add('chatdock-drop-after');
+    else getDragRow(dragState.beforeId)?.classList.add('chatdock-drop-before');
+  }
+
+  function removeDragListeners() {
+    window.removeEventListener('pointermove', onDragPointerMove);
+    window.removeEventListener('pointerup', onDragPointerUp);
+    window.removeEventListener('pointercancel', onDragPointerCancel);
+  }
+
+  async function finishDrag(commit) {
+    const state = dragState;
+    if (!state) return;
+    removeDragListeners();
+    try {
+      state.handle.releasePointerCapture?.(state.pointerId);
+    } catch {}
+    clearDragPreview();
+    dragState = null;
+    const shouldRender = renderPendingDuringDrag;
+    renderPendingDuringDrag = false;
+    if (commit) {
+      try {
+        await updatePins((pins) => movePinBefore(pins, state.draggedId, state.beforeId));
+      } finally {
+        scheduleRender();
+      }
+    } else if (shouldRender) {
+      scheduleRender();
+    }
+  }
+
+  function onDragPointerMove(event) {
+    if (dragState && event.pointerId === dragState.pointerId) updateDragPreview(event.clientY);
+  }
+
+  function onDragPointerUp(event) {
+    if (dragState && event.pointerId === dragState.pointerId) finishDrag(true).catch(handleAsyncError);
+  }
+
+  function onDragPointerCancel(event) {
+    if (dragState && event.pointerId === dragState.pointerId) finishDrag(false).catch(handleAsyncError);
+  }
+
+  function startDrag(event, pin, list, handle) {
+    if (event.button !== 0 || !event.isPrimary || dragState) return;
+    event.preventDefault();
+    dragState = { beforeId: null, draggedId: pin.id, handle, list, pointerId: event.pointerId };
+    try {
+      handle.setPointerCapture?.(event.pointerId);
+    } catch {}
+    window.addEventListener('pointermove', onDragPointerMove);
+    window.addEventListener('pointerup', onDragPointerUp);
+    window.addEventListener('pointercancel', onDragPointerCancel);
+    updateDragPreview(event.clientY);
+  }
+
+  function createDragHandle(pin, list) {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'chatdock-drag-handle';
+    handle.textContent = '⠿';
+    handle.title = `${pin.title}をドラッグして並べ替え`;
+    handle.setAttribute('aria-label', handle.title);
+    handle.addEventListener('pointerdown', (event) => startDrag(event, pin, list, handle));
+    return handle;
+  }
+
   function createColorButton(pin) {
     const colorName = pin.color ? COLOR_NAMES[pin.color] : '未設定';
     const button = createButton('', `chatdock-color-button${pin.color ? ` chatdock-color-${pin.color}` : ''}`, () => {
@@ -186,6 +296,10 @@
 
   async function render() {
     const generation = ++renderGeneration;
+    if (dragState) {
+      renderPendingDuringDrag = true;
+      return;
+    }
     const target = getMountTarget();
     const existing = document.getElementById(ROOT_ID);
     if (!target) {
@@ -201,7 +315,10 @@
 
     const currentChatId = getChatId();
     const { pins } = await getState();
-    if (generation !== renderGeneration) return;
+    if (generation !== renderGeneration || dragState) {
+      if (dragState) renderPendingDuringDrag = true;
+      return;
+    }
     root.replaceChildren();
     const header = document.createElement('div');
     header.className = 'chatdock-header';
@@ -224,6 +341,8 @@
     for (const pin of pins) {
       const row = document.createElement('div');
       row.className = `chatdock-row${pin.id === currentChatId ? ' chatdock-current' : ''}`;
+      row.dataset.chatdockPinId = pin.id;
+      row.appendChild(createDragHandle(pin, list));
       row.appendChild(createColorButton(pin));
       const link = document.createElement('a');
       link.className = 'chatdock-link';
@@ -240,6 +359,10 @@
   }
 
   function scheduleRender() {
+    if (dragState) {
+      renderPendingDuringDrag = true;
+      return;
+    }
     window.clearTimeout(renderTimer);
     renderTimer = window.setTimeout(() => {
       lastUrl = location.href;
