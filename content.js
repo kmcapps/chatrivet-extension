@@ -204,10 +204,20 @@
     window.addEventListener('popstate', notify);
   }
 
-  new MutationObserver((mutations) => {
+  function shouldRenderForMutations(mutations) {
     const root = document.getElementById(ROOT_ID);
-    if (mutations.some((mutation) => !root || !root.contains(mutation.target))) scheduleRender();
-  }).observe(document.documentElement, { childList: true, subtree: true });
+    const nav = findChatHistoryNav();
+    if (!nav) return true;
+    return mutations.some((mutation) => {
+      if (root?.contains(mutation.target)) return false;
+      if (nav.contains(mutation.target)) return true;
+      return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => node === nav || (node.nodeType === Node.ELEMENT_NODE && (node.contains(nav) || nav.contains(node))));
+    });
+  }
+
+  new MutationObserver((mutations) => {
+    if (shouldRenderForMutations(mutations)) scheduleRender();
+  }).observe(document.documentElement, { attributeFilter: ['data-active', 'aria-current'], attributes: true, childList: true, subtree: true });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && (changes[STORAGE_KEY] || changes.pinnedChats)) scheduleRender();
   });
