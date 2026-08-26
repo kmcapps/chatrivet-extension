@@ -247,6 +247,12 @@
     }, 120);
   }
 
+  function closeColorPicker() {
+    if (!activeColorPickerId) return;
+    activeColorPickerId = null;
+    scheduleRender();
+  }
+
   function observeNavigation() {
     const notify = () => { if (location.href !== lastUrl) scheduleRender(); };
     for (const method of ['pushState', 'replaceState']) {
@@ -274,6 +280,14 @@
   new MutationObserver((mutations) => {
     if (shouldRenderForMutations(mutations)) scheduleRender();
   }).observe(document.documentElement, { attributeFilter: ['data-active', 'aria-current'], attributes: true, childList: true, subtree: true });
+  document.addEventListener('pointerdown', (event) => {
+    if (!activeColorPickerId || !(event.target instanceof Element)) return;
+    if (event.target.closest('.chatdock-color-button, .chatdock-color-picker')) return;
+    closeColorPicker();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeColorPicker();
+  });
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && (changes[STORAGE_KEY] || changes.pinnedChats)) scheduleRender();
   });
