@@ -4,9 +4,13 @@
   const STORAGE_KEY = 'chatdockState';
   const STATE_VERSION = 1;
   const TITLE_LIMIT = 120;
+  const COLOR_OPTIONS = ['blue', 'teal', 'green', 'yellow', 'orange', 'red', 'purple', 'pink'];
+  const COLOR_NAMES = { blue: '青', teal: '青緑', green: '緑', yellow: '黄', orange: '橙', red: '赤', purple: '紫', pink: '桃' };
+  const COLOR_SET = new Set(COLOR_OPTIONS);
   let renderTimer;
   let renderGeneration = 0;
   let lastUrl = location.href;
+  let activeColorPickerId = null;
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -24,12 +28,19 @@
     return `${location.origin}/c/${encodeURIComponent(id)}`;
   }
 
+  function normalizeColor(value) {
+    return typeof value === 'string' && COLOR_SET.has(value) ? value : null;
+  }
+
   function normalizePin(value, seen) {
     if (!value || typeof value !== 'object' || typeof value.id !== 'string') return null;
     const id = value.id.trim();
     if (!id || id.length > 200 || seen.has(id)) return null;
     seen.add(id);
-    return { id, title: normalizeText(value.title).slice(0, TITLE_LIMIT) || '無題のチャット', pinnedAt: Number.isFinite(value.pinnedAt) ? value.pinnedAt : Date.now() };
+    const pin = { id, title: normalizeText(value.title).slice(0, TITLE_LIMIT) || '無題のチャット', pinnedAt: Number.isFinite(value.pinnedAt) ? value.pinnedAt : Date.now() };
+    const color = normalizeColor(value.color);
+    if (color) pin.color = color;
+    return pin;
   }
 
   function normalizeState(raw) {
@@ -126,8 +137,51 @@
   }
 
   async function removePin(id) {
+    if (activeColorPickerId === id) activeColorPickerId = null;
     await updatePins((pins) => pins.filter((pin) => pin.id !== id));
     scheduleRender();
+  }
+
+  async function setPinColor(id, color) {
+    await updatePins((pins) => pins.map((pin) => {
+      if (pin.id !== id) return pin;
+      const next = { ...pin };
+      if (color) next.color = color;
+      else delete next.color;
+      return next;
+    }));
+    activeColorPickerId = null;
+    scheduleRender();
+  }
+
+  function createColorButton(pin) {
+    const colorName = pin.color ? COLOR_NAMES[pin.color] : '未設定';
+    const button = createButton('', `chatdock-color-button${pin.color ? ` chatdock-color-${pin.color}` : ''}`, () => {
+      activeColorPickerId = activeColorPickerId === pin.id ? null : pin.id;
+      scheduleRender();
+    }, `${pin.title}の色を変更（現在: ${colorName}）`);
+    if (pin.color) button.dataset.color = pin.color;
+    button.setAttribute('aria-expanded', String(activeColorPickerId === pin.id));
+    button.setAttribute('aria-controls', `chatdock-color-picker-${pin.id}`);
+    const marker = document.createElement('span');
+    marker.className = 'chatdock-color-marker';
+    marker.setAttribute('aria-hidden', 'true');
+    button.appendChild(marker);
+    return button;
+  }
+
+  function createColorPicker(pin) {
+    const picker = document.createElement('div');
+    picker.id = `chatdock-color-picker-${pin.id}`;
+    picker.className = 'chatdock-color-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'ピンの色を選択');
+    for (const color of COLOR_OPTIONS) {
+      const option = createButton('', `chatdock-color-option chatdock-color-${color}${pin.color === color ? ' chatdock-color-selected' : ''}`, () => setPinColor(pin.id, color), `${pin.title}を${COLOR_NAMES[color]}に設定`);
+      picker.appendChild(option);
+    }
+    picker.appendChild(createButton('None', 'chatdock-color-clear', () => setPinColor(pin.id, null), `${pin.title}の色をクリア`));
+    return picker;
   }
 
   async function render() {
@@ -170,6 +224,7 @@
     for (const pin of pins) {
       const row = document.createElement('div');
       row.className = `chatdock-row${pin.id === currentChatId ? ' chatdock-current' : ''}`;
+      row.appendChild(createColorButton(pin));
       const link = document.createElement('a');
       link.className = 'chatdock-link';
       link.href = getChatUrl(pin.id);
@@ -177,6 +232,7 @@
       link.title = pin.title;
       row.appendChild(link);
       row.appendChild(createButton('×', 'chatdock-remove', () => removePin(pin.id), 'ピン留めを解除'));
+      if (activeColorPickerId === pin.id) row.appendChild(createColorPicker(pin));
       list.appendChild(row);
     }
     root.appendChild(list);

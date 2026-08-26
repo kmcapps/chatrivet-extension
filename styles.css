@@ -1,14 +1,30 @@
 .chatdock-root { color: inherit; font: inherit; margin: .25rem 0; padding: 0 .5rem; }
 .chatdock-header { align-items: center; display: flex; justify-content: space-between; min-height: 2rem; padding: 0 .5rem; }
 .chatdock-heading { font-size: .75rem; font-weight: 600; opacity: .7; }
-.chatdock-add, .chatdock-remove { appearance: none; background: transparent; border: 0; border-radius: .375rem; color: inherit; cursor: pointer; font: inherit; line-height: 1; }
+.chatdock-add, .chatdock-remove, .chatdock-color-button, .chatdock-color-option, .chatdock-color-clear { appearance: none; background: transparent; border: 0; border-radius: .375rem; color: inherit; cursor: pointer; font: inherit; line-height: 1; }
 .chatdock-add { font-size: 1.25rem; height: 1.75rem; opacity: .65; width: 1.75rem; }
-.chatdock-add:hover, .chatdock-remove:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible { background: rgba(127, 127, 127, .16); opacity: 1; outline: none; }
-@supports (background: color-mix(in srgb, currentColor 10%, transparent)) { .chatdock-add:hover, .chatdock-remove:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible { background: color-mix(in srgb, currentColor 10%, transparent); } }
-.chatdock-row { align-items: center; border-radius: .5rem; display: flex; gap: .25rem; min-height: 2.25rem; padding-left: .5rem; }
+.chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible { background: rgba(127, 127, 127, .16); opacity: 1; outline: none; }
+@supports (background: color-mix(in srgb, currentColor 10%, transparent)) { .chatdock-add:hover, .chatdock-remove:hover, .chatdock-color-button:hover, .chatdock-add:focus-visible, .chatdock-remove:focus-visible, .chatdock-color-button:focus-visible { background: color-mix(in srgb, currentColor 10%, transparent); } }
+.chatdock-row { align-items: center; border-radius: .5rem; display: flex; gap: .25rem; min-height: 2.25rem; padding-left: .5rem; position: relative; }
 .chatdock-row:hover, .chatdock-current { background: rgba(127, 127, 127, .12); }
 @supports (background: color-mix(in srgb, currentColor 8%, transparent)) { .chatdock-row:hover, .chatdock-current { background: color-mix(in srgb, currentColor 8%, transparent); } }
 .chatdock-link { color: inherit; flex: 1; min-width: 0; overflow: hidden; padding: .5rem 0; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .chatdock-remove { font-size: 1rem; height: 1.75rem; margin-right: .25rem; opacity: 0; width: 1.75rem; }
 .chatdock-row:hover .chatdock-remove, .chatdock-remove:focus-visible { opacity: .65; }
+.chatdock-color-button { align-items: center; display: inline-flex; flex: 0 0 1.5rem; height: 1.75rem; justify-content: center; padding: 0; width: 1.5rem; }
+.chatdock-color-marker { border: 1px solid currentColor; border-radius: 50%; box-sizing: border-box; height: .625rem; opacity: .45; width: .625rem; }
+.chatdock-color-button[data-color] .chatdock-color-marker { background: var(--chatdock-color); border-color: var(--chatdock-color); border-radius: .125rem; height: .875rem; opacity: 1; width: .1875rem; }
+.chatdock-color-picker { align-items: center; background: Canvas; border: 1px solid rgba(127, 127, 127, .35); border-radius: .5rem; box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .2); display: flex; gap: .125rem; left: .5rem; padding: .25rem; position: absolute; top: calc(100% - .25rem); z-index: 1; }
+.chatdock-color-option { background: var(--chatdock-color); border: 2px solid transparent; border-radius: 50%; height: 1.25rem; padding: 0; width: 1.25rem; }
+.chatdock-color-option:hover, .chatdock-color-option:focus-visible, .chatdock-color-selected { border-color: CanvasText; outline: none; }
+.chatdock-color-clear { font-size: .75rem; height: 1.25rem; padding: 0 .375rem; white-space: nowrap; }
+.chatdock-color-clear:hover, .chatdock-color-clear:focus-visible { background: rgba(127, 127, 127, .16); outline: none; }
+.chatdock-color-blue { --chatdock-color: #3b82f6; }
+.chatdock-color-teal { --chatdock-color: #14b8a6; }
+.chatdock-color-green { --chatdock-color: #22c55e; }
+.chatdock-color-yellow { --chatdock-color: #eab308; }
+.chatdock-color-orange { --chatdock-color: #f97316; }
+.chatdock-color-red { --chatdock-color: #ef4444; }
+.chatdock-color-purple { --chatdock-color: #a855f7; }
+.chatdock-color-pink { --chatdock-color: #ec4899; }
 .chatdock-hide-recent-duplicate { display: none !important; }
