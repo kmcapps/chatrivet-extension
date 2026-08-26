@@ -82,15 +82,27 @@
     if (!nav) return null;
     const officialPins = findSectionButton(nav, /^(ピン留め|pinned)$/i);
     const recent = findSectionButton(nav, /^(最近|recent)$/i);
-    const findTopLevelSection = (button) => {
-      let section = button?.parentElement;
+    const findTopLevelSection = (element) => {
+      let section = element;
       while (section?.parentElement && section.parentElement !== nav) section = section.parentElement;
       return section?.parentElement === nav ? section : null;
     };
     const officialPinsSection = findTopLevelSection(officialPins);
     const recentSection = findTopLevelSection(recent);
-    if (!officialPins || !recent || !officialPinsSection || !recentSection || officialPinsSection === recentSection || officialPinsSection.compareDocumentPosition(recentSection) & Node.DOCUMENT_POSITION_PRECEDING) return null;
-    return { parent: nav, before: recentSection, recentSection };
+    if ((officialPins && !officialPinsSection) || (recent && !recentSection)) return null;
+    if (officialPinsSection && recentSection) {
+      if (officialPinsSection === recentSection || officialPinsSection.compareDocumentPosition(recentSection) & Node.DOCUMENT_POSITION_PRECEDING) return null;
+      return { parent: nav, before: recentSection, recentSection };
+    }
+    if (recentSection) return { parent: nav, before: recentSection, recentSection };
+    if (officialPinsSection) {
+      let before = officialPinsSection.nextElementSibling;
+      if (before?.id === ROOT_ID) before = before.nextElementSibling;
+      return { parent: nav, before, recentSection: null };
+    }
+    const historyLink = [...nav.querySelectorAll('a[href^="/c/"]')].find((link) => !link.closest(`#${ROOT_ID}`));
+    const historySection = findTopLevelSection(historyLink);
+    return historySection ? { parent: nav, before: historySection, recentSection: null } : null;
   }
 
   function clearHiddenRecentDuplicates() {
@@ -355,7 +367,8 @@
       list.appendChild(row);
     }
     root.appendChild(list);
-    syncRecentDuplicates(target.recentSection, pins);
+    if (target.recentSection) syncRecentDuplicates(target.recentSection, pins);
+    else clearHiddenRecentDuplicates();
   }
 
   function scheduleRender() {
