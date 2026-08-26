@@ -5,11 +5,11 @@
 ## 基本情報
 
 - 名称: ChatRivet
-- カテゴリ: Productivity
+- カテゴリ: ツール
 - 主な言語: 日本語
 - 料金: 無料
 - サポートURL: https://github.com/kmcapps/chatrivet-extension/issues
-- プライバシーポリシーURL（Commit・Push後）: https://github.com/kmcapps/chatrivet-extension/blob/main/PRIVACY.md
+- プライバシーポリシーURL: https://github.com/kmcapps/chatrivet-extension/blob/main/PRIVACY.md
 
 ## 公開連絡先
 
@@ -25,7 +25,7 @@ ChatGPTの左サイドバーにローカル保存の独自ピン一覧を追加�
 
 ChatRivetは、ChatGPTの左サイドバーに独自のピン一覧を追加し、よく使うチャットへすばやく戻るための拡張機能です。
 
-現在開いているチャットをChatRivetへ追加すると、公式の「ピン留め」とは別の一覧として、左サイドバーの「ピン留め」と「最近」の間に表示します。ChatRivetに追加したチャットは、公式の「最近」一覧では重複表示されません。ピンを解除すると、公式の「最近」一覧に再び表示されます。
+現在開いているチャットをChatRivetへ追加すると、公式の「ピン留め」とは別の一覧として、ChatGPT左サイドバーのチャット履歴付近に表示します。公式「ピン留め」がない環境でも、利用可能なサイドバー構造に合わせて安全な位置へ表示します。適切な表示位置が見つからない場合は、公式UIを壊さないため無理に挿入しません。ChatRivetに追加したチャットは、公式の「最近」一覧では重複表示されません。ピンを解除すると、公式の「最近」一覧に再び表示されます。
 
 主な機能
 
@@ -34,6 +34,7 @@ ChatRivetは、ChatGPTの左サイドバーに独自のピン一覧を追加し�
 - いつでもピン解除
 - ピンごとの色分け（固定8色）
 - 専用ドラッグハンドルによるピンの手動並べ替え
+- ピン情報・色・表示順をChromeのローカルストレージに保存
 - ChatGPTの画面遷移とサイドバー再描画に追従
 - ライト／ダークテーマに追従
 
@@ -65,19 +66,31 @@ No, I am not using remote code.
 
 ユーザーがピンに追加したチャットについて、ChatGPTのサイドバーに表示されるタイトルと、対象ページのチャットID、ピン留め日時、ユーザーが選択したピンの色、ユーザーが設定したピンの表示順をChromeプロファイル内にローカル保存します。ChatGPTアカウントごとの自動分離は行いません。外部送信、販売、広告、分析、追跡は行いません。
 
-Developer Dashboardの分類では、少なくとも「Website content」と「Web history」に該当する可能性があるため、申請直前に実際の選択肢と照合して正確に申告します。
+Developer Dashboardでは「Web history」「Website content」「User activity」を選択し、申請直前に実際の選択肢と照合して正確に申告します。
 
 ### 申請時の事前開示・同意
 
-ストア掲載文とPrivacy practicesで、チャットID・サイドバー上のタイトル・ピン留め日時・ユーザーが選択したピンの色をローカル保存し、独自ピン一覧の表示・移動・解除・色分けのためだけに使用することを明示する。公開前にDeveloper Dashboard上の同意・認証項目を確認し、必要な同意取得を完了する。
+ストア掲載文とPrivacy practicesで、チャットID・サイドバー上のタイトル・ピン留め日時・ユーザーが選択したピンの色・pins配列順による表示順をローカル保存し、独自ピン一覧の表示・移動・解除・色分け・並べ替えのためだけに使用することを明示する。公開前にDeveloper Dashboard上の同意・認証項目を確認し、必要な同意取得を完了する。
 
 ## 審査テスト手順案
 
-1. `https://chatgpt.com/` を開き、ChatGPTへログインします。
-2. 既存のチャットを開くと、左サイドバーの公式「ピン留め」と「最近」の間にChatRivetが表示されます。
-3. ChatRivet見出しの「+」を押すと、現在のチャットが一覧へ追加されます。
-4. 一覧のタイトルを選ぶと、対象チャットへ移動します。
-5. ピン解除操作を行うと、ChatRivetから削除され、公式「最近」で再表示されます。
+No ChatRivet-specific account, paid ChatGPT plan, or special setup is required.
+Any standard ChatGPT account with at least one existing conversation can be used.
+
+1. Open `https://chatgpt.com/` and sign in.
+2. After installing the extension, reload the ChatGPT tab once.
+3. Open an existing conversation and confirm that the URL contains `/c/`.
+4. Expand the left sidebar.
+5. Find the ChatRivet section near the chat history. An official Pinned section is not required.
+6. Click the `+` button next to ChatRivet.
+7. Confirm that the currently open conversation appears in the ChatRivet list.
+8. Click the conversation title to open it.
+9. Click `×` to remove the pin. The conversation should appear in the official Recent list again.
+
+Additional feature checks:
+
+- Click the color marker to select a color or choose `None` to clear it.
+- Drag the six-dot handle to change the order of pinned conversations.
 
 ## 掲載素材チェックリスト
 

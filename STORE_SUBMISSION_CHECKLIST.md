@@ -1,62 +1,95 @@
-# ChatRivet v1.0 申請直前チェックリスト
+# ChatRivet v1.1.0 再提出直前チェックリスト
 
-このチェックリストはChrome Web Storeへの初回申請直前に使用します。申請・公開そのものは、このファイルを作成した時点では実行しません。
+このチェックリストは、Chrome Web StoreのRed Potassium拒否後に、修正版v1.1.0を再提出するために使用します。Dashboard変更・審査送信は、ユーザーの最終承認後に行います。
 
-## 未完了の外部手続き
+## 開発者アカウント
 
-- [x] `kmcapps.dev@gmail.com` を取得する。
-- [x] Chrome Web Store Developer Dashboardに公開・検証済み連絡先として登録し、検証を完了する。
-- [ ] Developer Dashboardの本人確認・二段階認証など、表示される公開要件を完了する。
+- [x] `kmcapps.dev@gmail.com`を取得する。
+- [x] Chrome Web Store Developer Dashboardの連絡先メール検証を完了する。
+- [x] Developer登録と2段階認証を完了する。
 
-## 公開物
+## Red Potassium対策
+
+- [x] 公式Pinned / Recentを任意アンカーとし、安全なmount fallbackを実装する。
+- [x] 公式PinnedなしでもChatRivetが表示されることを実機確認する。
+- [x] 既存チャットで`+`が表示され、最初のピンを追加できることを実機確認する。
+- [x] Recentなし時に重複非表示処理を安全に解除する。
+- [x] 既存機能の回帰テストとDiff監査を完了する。
+
+## 公開物・文書
 
 - [x] Manifest用PNGアイコン: 16、32、48、128px
 - [x] 小型プロモーション画像: 440x280 PNG
-- [x] 実機スクリーンショット: 1280x800 PNGを3枚。撮影内容は`SCREENSHOT_CAPTURE_GUIDE.md`に従い、個人情報を含めない。
-- [x] プライバシーポリシー案: `PRIVACY.md`
-- [x] 掲載情報案: `STORE_LISTING.md`
-- [ ] `PRIVACY.md`をCommit・Pushし、公開URLを確認する。
+- [x] プライバシーポリシー: `PRIVACY.md`
+- [x] v1.1.0の機能・配置・保存情報に合わせて`STORE_LISTING.md`を更新する。
+- [ ] 色分け、6点ハンドル、公式Pinnedなしの表示を反映した新しいスクリーンショットを確認する。
+- [ ] 新しいスクリーンショットに個人情報・旧名称・エラー表示が含まれないことを確認する。
+- [ ] 公開済みの`PRIVACY.md` URLがアクセス可能で、現在のデータ取扱いと一致することを確認する。
 
-## 申請版のソース
+## 申請版ソース
 
-- [x] `manifest.json`の`version`を`1.0.0`へ変更する。
-- [x] 公開ZIP `dist/ChatRivet-1.0.0.zip` を作成し、展開後のManifestと実行ファイル構成を検証する。
-- [x] `node --check content.js`、manifest JSON検証、拡張機能の再読み込み、ChatGPTタブ再読み込みを行う。
-- [x] MVPの手動テストを行う: 追加、移動、解除、公式「最近」の重複非表示と再表示、SPA遷移、ページ再読み込み、コンソールエラーなし。
-- [ ] 今回の申請用変更だけをレビューする。
-- [ ] ユーザー承認後に申請版Commitを作成する。
-- [ ] ユーザー承認後に申請版CommitをPushし、`v1.0.0`タグを作成する。
+- [x] `manifest.json`の`version`を`1.1.0`へ更新する。
+- [x] `node --check content.js`、manifest JSON検証、`git diff --check`を実行する。
+- [x] Manifestの権限が`storage`のみ、対象が`https://chatgpt.com/*`のみであることを確認する。
+- [ ] 色分け、手動並べ替え、mount fallbackを含む申請版の全回帰テストを行う。
+- [ ] 公式Pinnedなし、pins 0件、既存チャット`/c/{id}`の初回操作を再確認する。
+- [ ] Chrome拡張機能管理画面に新規エラーがないことを確認する。
+- [ ] 申請用変更だけを最終Diffレビューする。
 
 ## Developer Dashboard入力
 
 - [ ] 名称: ChatRivet
-- [ ] カテゴリ: Productivity
+- [ ] カテゴリ: ツール
 - [ ] 主な言語: 日本語
 - [ ] サポートURL: `https://github.com/kmcapps/chatrivet-extension/issues`
-- [ ] プライバシーポリシーURL: 公開済みの`PRIVACY.md`
-- [ ] 短い説明・詳細説明: `STORE_LISTING.md`の案を貼り付け、最新仕様と照合する。
-- [ ] Privacy practices: 保存データ、Chromeプロファイル単位のローカル保存、外部送信なしを正確に申告する。
-- [ ] Privacy practices: 実際の選択肢を確認し、Website content／Web historyなど該当するデータ分類のみを選ぶ。
-- [ ] Privacy practices: 単一目的、`storage`権限、`https://chatgpt.com/*`への限定アクセス、Remote codeなしを入力する。
-- [ ] 掲載文とPrivacy practicesで、保存するデータと利用目的を事前に明確に開示し、Dashboardで求められる同意・認証を完了する。
+- [ ] プライバシーポリシーURL: `https://github.com/kmcapps/chatrivet-extension/blob/main/PRIVACY.md`
+- [ ] 短い説明・詳細説明をv1.1.0の機能とmount fallbackへ合わせて更新する。
+- [ ] 審査担当者向け英語テスト手順を入力する。
+- [ ] Privacy practicesの`storage`理由へ、ピン情報・色・表示順のローカル保存を記載する。
+- [ ] 保存情報としてchatId、サイドバー上のタイトル、pinnedAt、ユーザー選択色、pins配列順による表示順を記載する。
+- [ ] データ分類としてWeb history、Website content、User activityを選択する。
+- [ ] 単一目的、`https://chatgpt.com/*`への限定アクセス、Remote codeなしを再確認する。
+- [ ] Chromeプロファイル単位の保存、外部送信なし、会話本文・Cookie・認証情報を扱わないことを掲載文とPrivacy practicesで一致させる。
 
 ## 提出ZIP
 
-ZIPのルートには、実行に必要な次だけを含める。
+- [ ] `dist/ChatRivet-1.1.0.zip`を新規作成する。
+- [ ] ZIPのルートに実行に必要な次のファイルだけが含まれることを確認する。
+  - `manifest.json`
+  - `content.js`
+  - `styles.css`
+  - `icons/icon-16.png`
+  - `icons/icon-32.png`
+  - `icons/icon-48.png`
+  - `icons/icon-128.png`
+- [ ] `.git`、文書、`store-assets/`、`tools/`、スクリーンショット、テスト・モックをZIPへ含めていないことを確認する。
+- [ ] ZIP内Manifestが有効で、versionが`1.1.0`であることを確認する。
+- [ ] ZIP内実行ファイルと申請版Commitのハッシュが一致することを確認する。
+- [ ] ZIPを別の場所へ展開し、展開した正確な提出物をChromeへ読み込んで実機テストする。
 
-- `manifest.json`
-- `content.js`
-- `styles.css`
-- `icons/icon-16.png`
-- `icons/icon-32.png`
-- `icons/icon-48.png`
-- `icons/icon-128.png`
+## Git・リリース
 
-含めないもの: `.git`、`README.md`、`PRIVACY.md`、`STORE_LISTING.md`、`STORE_SUBMISSION_CHECKLIST.md`、`store-assets/`、`tools/`、スクリーンショット、開発用ファイル。
+- [ ] Commit直前の`git status`とDiffを確認する。
+- [ ] ユーザー承認後に申請版Commitを作成する。
+- [ ] 検証済みZIPが申請版Commitと一致することを確認する。
+- [ ] 問題がなければ申請版Commitへ注釈付きtag `v1.1.0`を作成する。
+- [ ] release branchをPushし、安全にmainへ統合する。
+- [ ] mainと`v1.1.0` tagをoriginへPushする。
+- [ ] ローカルmain、origin/main、`v1.1.0`が意図したCommitを指すことを確認する。
+
+## Dashboard最終監査・再提出
+
+- [ ] 新ZIPをChrome Web Store Developer Dashboardへアップロードする。
+- [ ] Dashboardに表示されるversionが`1.1.0`であることを確認する。
+- [ ] Store Listing、Privacy practices、販売地域、テスト手順、掲載素材を最終監査する。
+- [ ] Red Potassium拒否対象だった追加・表示・移動・解除の再現手順が明確であることを確認する。
+- [ ] ユーザーの最終承認を得る。
+- [ ] 最終承認後に「審査のため送信」を実行する。
 
 ## 提出停止条件
 
-- メールアドレスの取得・検証が未完了。
-- 公開用スクリーンショットが未作成または個人情報を含む。
-- Privacy practicesの選択肢を実画面で確認できていない。
-- 最終版の動作確認または最終レビューが未完了。
+- 新スクリーンショットまたは新ZIPが未検証。
+- 正確な提出ZIPを使った実機テストが未完了。
+- Privacy practicesと実装・文書の保存情報が一致していない。
+- 英語テスト手順がDashboardへ入力されていない。
+- 最終回帰テスト、Diff監査、ユーザー最終承認のいずれかが未完了。
