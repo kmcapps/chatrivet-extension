@@ -12,12 +12,13 @@
   let lastUrl = location.href;
   let activeColorPickerId = null;
   let dragState = null;
+  let pinUpdateQueue = Promise.resolve();
   let renderPendingDuringDrag = false;
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
   function getChatId(pathname = location.pathname) {
-    const match = pathname.match(/^\/c\/([^/?#]+)/);
+    const match = pathname.match(/^\/(?:c|g\/[^/]+\/c)\/([^/?#]+)/);
     if (!match || match[1].length > 200) return null;
     try {
       return decodeURIComponent(match[1]);
@@ -28,6 +29,20 @@
 
   function getChatUrl(id) {
     return `${location.origin}/c/${encodeURIComponent(id)}`;
+  }
+
+  function getChatIdFromHref(href) {
+    try {
+      return getChatId(new URL(href, location.origin).pathname);
+    } catch {
+      return null;
+    }
+  }
+
+  function findOfficialChatLink(container) {
+    return [...container.querySelectorAll('a[href]')].find((link) => (
+      !link.closest(`#${ROOT_ID}`) && getChatIdFromHref(link.getAttribute('href') || '')
+    )) || null;
   }
 
   function normalizeColor(value) {
@@ -60,14 +75,18 @@
     await chrome.storage.local.set({ [STORAGE_KEY]: normalizeState(state) });
   }
 
-  async function updatePins(updater) {
-    const state = await getState();
-    await saveState({ version: STATE_VERSION, pins: updater(state.pins.slice()) });
+  function updatePins(updater) {
+    const update = pinUpdateQueue.then(async () => {
+      const state = await getState();
+      await saveState({ version: STATE_VERSION, pins: updater(state.pins.slice()) });
+    });
+    pinUpdateQueue = update.catch(() => {});
+    return update;
   }
 
   function findChatHistoryNav() {
     const navs = [...document.querySelectorAll('nav')];
-    return navs.find((nav) => /チャット履歴|chat history/i.test(nav.getAttribute('aria-label') || '')) || navs.find((nav) => nav.querySelector('a[href^="/c/"]')) || null;
+    return navs.find((nav) => /チャット履歴|chat history/i.test(nav.getAttribute('aria-label') || '')) || navs.find((nav) => findOfficialChatLink(nav)) || null;
   }
 
   function findSectionButton(nav, names) {
@@ -100,7 +119,7 @@
       if (before?.id === ROOT_ID) before = before.nextElementSibling;
       return { parent: nav, before, recentSection: null };
     }
-    const historyLink = [...nav.querySelectorAll('a[href^="/c/"]')].find((link) => !link.closest(`#${ROOT_ID}`));
+    const historyLink = findOfficialChatLink(nav);
     const historySection = findTopLevelSection(historyLink);
     return historySection ? { parent: nav, before: historySection, recentSection: null } : null;
   }
@@ -116,15 +135,72 @@
     const pinnedIds = new Set(pins.map((pin) => pin.id));
     const rows = [...recentSection.querySelectorAll('li, [role="listitem"]')];
     for (const row of rows) {
-      const link = row.querySelector('a[href^="/c/"]');
-      const id = link ? getChatId(link.getAttribute('href') || '') : null;
+      const link = [...row.querySelectorAll('a[href]')].find((candidate) => getChatIdFromHref(candidate.getAttribute('href') || ''));
+      const id = link ? getChatIdFromHref(link.getAttribute('href') || '') : null;
       row.classList.toggle('chatdock-hide-recent-duplicate', Boolean(id && pinnedIds.has(id)));
     }
   }
 
   function getSidebarTitle(id) {
-    const link = [...document.querySelectorAll('a[href^="/c/"]')].find((candidate) => getChatId(candidate.getAttribute('href') || '') === id);
-    return normalizeText(link?.textContent).slice(0, TITLE_LIMIT) || '無題のチャット';
+    return getOfficialSidebarTitle(id) || '無題のチャット';
+  }
+
+  function getOfficialSidebarTitles(container, id) {
+    let matched = false;
+    const titles = new Set();
+    for (const candidate of container.querySelectorAll('a[href]')) {
+      if (candidate.closest(`#${ROOT_ID}`) || getChatIdFromHref(candidate.getAttribute('href') || '') !== id) continue;
+      matched = true;
+      const title = normalizeText(candidate.textContent).slice(0, TITLE_LIMIT);
+      if (title) titles.add(title);
+    }
+    return { matched, titles };
+  }
+
+  function getOfficialSidebarTitle(id, recentSection = null) {
+    if (recentSection) {
+      const recent = getOfficialSidebarTitles(recentSection, id);
+      if (recent.matched) return recent.titles.size === 1 ? recent.titles.values().next().value : null;
+    }
+    const nav = findChatHistoryNav();
+    if (!nav) return null;
+    const { titles } = getOfficialSidebarTitles(nav, id);
+    return titles.size === 1 ? titles.values().next().value : null;
+  }
+
+  function getSyncedPins(pins, recentSection = null) {
+    let changed = false;
+    const synced = pins.map((pin) => {
+      const title = getOfficialSidebarTitle(pin.id, recentSection);
+      if (!title || title === pin.title) return pin;
+      changed = true;
+      return { ...pin, title };
+    });
+    return changed ? synced : pins;
+  }
+
+  async function syncOfficialTitles(pins, recentSection = null) {
+    if (getSyncedPins(pins, recentSection) === pins) return pins;
+    let synced = pins;
+    await updatePins((latest) => {
+      synced = getSyncedPins(latest, recentSection);
+      return synced;
+    });
+    return synced;
+  }
+
+  async function addCurrentPin() {
+    const id = getChatId();
+    if (!id) return false;
+    let added = false;
+    const title = getSidebarTitle(id);
+    await updatePins((latest) => {
+      if (latest.some((pin) => pin.id === id)) return latest;
+      added = true;
+      return [...latest, { id, title, pinnedAt: Date.now() }];
+    });
+    if (added) scheduleRender();
+    return added;
   }
 
   function handleAsyncError(error) {
@@ -326,7 +402,12 @@
     if (root.parentElement !== target.parent || root.nextElementSibling !== target.before) target.parent.insertBefore(root, target.before);
 
     const currentChatId = getChatId();
-    const { pins } = await getState();
+    let { pins } = await getState();
+    if (generation !== renderGeneration || dragState) {
+      if (dragState) renderPendingDuringDrag = true;
+      return;
+    }
+    pins = await syncOfficialTitles(pins, target.recentSection);
     if (generation !== renderGeneration || dragState) {
       if (dragState) renderPendingDuringDrag = true;
       return;
@@ -339,12 +420,7 @@
     heading.textContent = 'ChatRivet';
     header.appendChild(heading);
     if (currentChatId && !pins.some((pin) => pin.id === currentChatId)) {
-      header.appendChild(createButton('＋', 'chatdock-add', async () => {
-        const id = getChatId();
-        if (!id) return;
-        await updatePins((latest) => latest.some((pin) => pin.id === id) ? latest : [...latest, { id, title: getSidebarTitle(id), pinnedAt: Date.now() }]);
-        scheduleRender();
-      }, '現在のチャットをピン留め'));
+      header.appendChild(createButton('＋', 'chatdock-add', addCurrentPin, '現在のチャットをピン留め'));
     }
     root.appendChild(header);
 
@@ -415,7 +491,7 @@
 
   new MutationObserver((mutations) => {
     if (shouldRenderForMutations(mutations)) scheduleRender();
-  }).observe(document.documentElement, { attributeFilter: ['data-active', 'aria-current'], attributes: true, childList: true, subtree: true });
+  }).observe(document.documentElement, { attributeFilter: ['data-active', 'aria-current'], attributes: true, characterData: true, childList: true, subtree: true });
   document.addEventListener('pointerdown', (event) => {
     if (!activeColorPickerId || !(event.target instanceof Element)) return;
     if (event.target.closest('.chatdock-color-button, .chatdock-color-picker')) return;
