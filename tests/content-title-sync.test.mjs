@@ -36,10 +36,10 @@ function makeClassList(initial = []) {
   };
 }
 
-function makeRecentRow(anchor, hidden = false) {
+function makeRecentRow(anchor) {
   return {
     anchor,
-    classList: makeClassList(hidden ? ['chatdock-hide-recent-duplicate'] : []),
+    classList: makeClassList(),
     querySelector(selector) {
       return selector === 'a[href^="/c/"]' ? anchor : null;
     },
@@ -198,7 +198,13 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
   const historyLink = new FakeElement('a');
   historyLink.setAttribute('href', historyHref);
   historyLink.textContent = 'History chat';
-  historySection.appendChild(historyLink);
+  const historyRow = new FakeElement('li');
+  historyRow.setAttribute('role', 'listitem');
+  historyRow.appendChild(historyLink);
+  const historyMenu = new FakeElement('button');
+  historyMenu.setAttribute('aria-label', 'History chat options');
+  historyRow.appendChild(historyMenu);
+  historySection.appendChild(historyRow);
   nav.appendChild(historySection);
   const documentListeners = new Map();
   return {
@@ -213,6 +219,8 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
         return [...own, ...documentElement.querySelectorAll(selector)];
       },
     },
+    historyMenu,
+    historyRow,
     nav,
     recentSection: includeRecent ? historySection : null,
   };
@@ -282,6 +290,8 @@ async function loadRenderedContent({ historyHref = '/c/history-chat', includeRec
   return {
     flushRender,
     getAddButton: () => renderedDocument.document.querySelector('.chatdock-add'),
+    getHistoryMenu: () => renderedDocument.historyMenu,
+    getHistoryRow: () => renderedDocument.historyRow,
     getRoot: () => renderedDocument.document.getElementById('chatdock-root'),
     history,
   };
@@ -291,7 +301,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
   const source = await readFile(contentPath, 'utf8');
   const instrumented = source.replace(
     /  observeNavigation\(\);\r?\n  scheduleRender\(\);\r?\n\}\)\(\);\s*$/,
-    '  observeNavigation();\n  globalThis.__chatdockTest = { addCurrentPin: typeof addCurrentPin === "function" ? addCurrentPin : undefined, getChatId, getSyncedPins, removePin, syncOfficialTitles, syncRecentDuplicates, updatePins };\n})();',
+    '  observeNavigation();\n  globalThis.__chatdockTest = { addCurrentPin: typeof addCurrentPin === "function" ? addCurrentPin : undefined, getChatId, getSyncedPins, removePin, syncOfficialTitles, updatePins };\n})();',
   );
   assert.notEqual(instrumented, source, 'test export hook must be installed');
 
@@ -347,9 +357,6 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
           return selectAnchors([...anchors, ...recentAnchors, ...offNavAnchors], selector);
         }
         if (selector === 'nav') return [nav];
-        if (selector === '.chatdock-hide-recent-duplicate') {
-          return recentRows.filter((row) => row.classList.contains('chatdock-hide-recent-duplicate'));
-        }
         return [];
       },
     },
@@ -463,6 +470,18 @@ test('F5-style initialization does not show the add button for an already pinned
   assert.equal(harness.getAddButton(), null);
 });
 
+test('F5-style rendering keeps a registered Recent row and its official actions visible', async () => {
+  const harness = await loadRenderedContent({
+    pathname: '/c/other-chat',
+    pins: [{ id: 'history-chat', title: 'History chat', pinnedAt: 1 }],
+  });
+
+  await harness.flushRender();
+
+  assert.equal(harness.getHistoryRow().classList.contains('chatdock-hide-recent-duplicate'), false);
+  assert.equal(harness.getHistoryMenu().getAttribute('aria-label'), 'History chat options');
+});
+
 test('F5-style Project-only history mounts ChatRivet and renders the add button without Pinned or Recent', async () => {
   const harness = await loadRenderedContent({
     historyHref: '/g/project123/c/history-chat',
@@ -523,6 +542,22 @@ test('keeps the normal conversation add path working', async () => {
   ]);
 });
 
+test('adding and removing a normal pin leaves its official Recent row visible', async () => {
+  const recentRow = makeRecentRow(makeAnchor('/c/chat-normal', 'Normal conversation title'));
+  const harness = await loadContent({
+    pathname: '/c/chat-normal',
+    recentRows: [recentRow],
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.equal(recentRow.classList.contains('chatdock-hide-recent-duplicate'), false);
+
+  await harness.api.removePin('chat-normal');
+
+  assert.equal(recentRow.classList.contains('chatdock-hide-recent-duplicate'), false);
+  assert.deepEqual(harness.getStoredPins(), []);
+});
+
 test('serializes a Project add with a concurrent official-title update without losing either change', async () => {
   const original = [{ id: 'existing', title: 'Old title', pinnedAt: 1, color: 'blue' }];
   const harness = await loadContent({
@@ -545,9 +580,9 @@ test('serializes a Project add with a concurrent official-title update without l
   ]);
 });
 
-test('can read a hidden Recent duplicate when it is the only official candidate', async () => {
+test('can read a visible Recent row when it is the only official candidate', async () => {
   const original = [{ id: 'chat-a', title: 'Old A', pinnedAt: 10 }];
-  const recentRow = makeRecentRow(makeAnchor('/c/chat-a', 'New A'), true);
+  const recentRow = makeRecentRow(makeAnchor('/c/chat-a', 'New A'));
   const harness = await loadContent({ pins: original, recentRows: [recentRow] });
 
   const synced = harness.api.getSyncedPins(original, harness.recentSection);
@@ -567,18 +602,18 @@ test('does not fall back to another section when Recent has an empty or conflict
     ],
     pins: original,
     recentRows: [
-      makeRecentRow(makeAnchor('/c/empty', '   '), true),
-      makeRecentRow(makeAnchor('/c/conflict', 'Recent title one'), true),
-      makeRecentRow(makeAnchor('/c/conflict', 'Recent title two'), true),
+      makeRecentRow(makeAnchor('/c/empty', '   ')),
+      makeRecentRow(makeAnchor('/c/conflict', 'Recent title one')),
+      makeRecentRow(makeAnchor('/c/conflict', 'Recent title two')),
     ],
   });
 
   assert.equal(harness.api.getSyncedPins(original, harness.recentSection), original);
 });
 
-test('prefers the hidden Recent duplicate when another official copy still has a stale title', async () => {
+test('prefers the visible Recent row when another official copy still has a stale title', async () => {
   const original = [{ id: 'chat-a', title: 'Old A', pinnedAt: 10, color: 'green' }];
-  const recentRow = makeRecentRow(makeAnchor('/c/chat-a', 'New A'), true);
+  const recentRow = makeRecentRow(makeAnchor('/c/chat-a', 'New A'));
   const harness = await loadContent({
     anchors: [makeAnchor('/c/chat-a', 'Old A')],
     pins: original,
@@ -592,7 +627,7 @@ test('prefers the hidden Recent duplicate when another official copy still has a
   ]);
 });
 
-test('F5-style initialization can hide Recent first and still persist its latest title', async () => {
+test('title synchronization keeps a registered Recent row visible while persisting its latest title', async () => {
   const original = [{ id: 'chat-a', title: 'Old A', pinnedAt: 10, color: 'purple' }];
   const recentRow = makeRecentRow(makeAnchor('/c/chat-a', 'New A'));
   const harness = await loadContent({
@@ -601,8 +636,7 @@ test('F5-style initialization can hide Recent first and still persist its latest
     recentRows: [recentRow],
   });
 
-  harness.api.syncRecentDuplicates(harness.recentSection, original);
-  assert.equal(recentRow.classList.contains('chatdock-hide-recent-duplicate'), true);
+  assert.equal(recentRow.classList.contains('chatdock-hide-recent-duplicate'), false);
 
   await harness.api.syncOfficialTitles(original, harness.recentSection);
 

@@ -124,23 +124,6 @@
     return historySection ? { parent: nav, before: historySection, recentSection: null } : null;
   }
 
-  function clearHiddenRecentDuplicates() {
-    for (const row of document.querySelectorAll('.chatdock-hide-recent-duplicate')) {
-      row.classList.remove('chatdock-hide-recent-duplicate');
-    }
-  }
-
-  function syncRecentDuplicates(recentSection, pins) {
-    clearHiddenRecentDuplicates();
-    const pinnedIds = new Set(pins.map((pin) => pin.id));
-    const rows = [...recentSection.querySelectorAll('li, [role="listitem"]')];
-    for (const row of rows) {
-      const link = [...row.querySelectorAll('a[href]')].find((candidate) => getChatIdFromHref(candidate.getAttribute('href') || ''));
-      const id = link ? getChatIdFromHref(link.getAttribute('href') || '') : null;
-      row.classList.toggle('chatdock-hide-recent-duplicate', Boolean(id && pinnedIds.has(id)));
-    }
-  }
-
   function getSidebarTitle(id) {
     return getOfficialSidebarTitle(id) || '無題のチャット';
   }
@@ -391,7 +374,6 @@
     const target = getMountTarget();
     const existing = document.getElementById(ROOT_ID);
     if (!target) {
-      clearHiddenRecentDuplicates();
       existing?.remove();
       return;
     }
@@ -443,8 +425,6 @@
       list.appendChild(row);
     }
     root.appendChild(list);
-    if (target.recentSection) syncRecentDuplicates(target.recentSection, pins);
-    else clearHiddenRecentDuplicates();
   }
 
   function scheduleRender() {
