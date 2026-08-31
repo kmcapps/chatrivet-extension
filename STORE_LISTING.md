@@ -25,7 +25,7 @@ ChatGPTの左サイドバーにローカル保存の独自ピン一覧を追加�
 
 ChatRivetは、ChatGPTの左サイドバーに独自のピン一覧を追加し、よく使うチャットへすばやく戻るための拡張機能です。
 
-現在開いているチャットをChatRivetへ追加すると、公式の「ピン留め」とは別の一覧として、ChatGPT左サイドバーのチャット履歴付近に表示します。公式「ピン留め」がない環境でも、利用可能なサイドバー構造に合わせて安全な位置へ表示します。適切な表示位置が見つからない場合は、公式UIを壊さないため無理に挿入しません。ChatRivetに追加したチャットは、公式の「最近」一覧では重複表示されません。ピンを解除すると、公式の「最近」一覧に再び表示されます。
+現在開いているチャットをChatRivetへ追加すると、公式の「ピン留め」とは別の一覧として、ChatGPT左サイドバーのチャット履歴付近に表示します。公式「ピン留め」がない環境でも、利用可能なサイドバー構造に合わせて安全な位置へ表示します。適切な表示位置が見つからない場合は、公式UIを壊さないため無理に挿入しません。ChatRivetへ追加しても公式の「最近」一覧にはそのまま表示され、同じチャットが両方の一覧に表示されます。公式「最近」の「…」メニューを引き続き利用でき、ChatRivetから解除しても公式履歴の表示には影響しません。
 
 主な機能
 
@@ -85,7 +85,7 @@ Any standard ChatGPT account with at least one existing conversation can be used
 6. Click the `+` button next to ChatRivet.
 7. Confirm that the currently open conversation appears in the ChatRivet list.
 8. Click the conversation title to open it.
-9. Click `×` to remove the pin. The conversation should appear in the official Recent list again.
+9. Confirm that the conversation is still visible in the official Recent list, then click `×` to remove the ChatRivet pin. The conversation should remain in Recent.
 
 Additional feature checks:
 
