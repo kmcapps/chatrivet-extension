@@ -6,7 +6,8 @@
 
 - 名称: ChatRivet
 - カテゴリ: ツール
-- 主な言語: 日本語
+- デフォルト言語: 日本語
+- 追加言語: English
 - 料金: 無料
 - サポートURL: https://github.com/kmcapps/chatrivet-extension/issues
 - プライバシーポリシーURL: https://github.com/kmcapps/chatrivet-extension/blob/main/PRIVACY.md
@@ -16,6 +17,8 @@
 - Developer Dashboardの公開・検証済み連絡先: `kmcapps.dev@gmail.com`
 - 状態: 取得済み・検証済み。Chrome Web Store Developer Dashboardの公開連絡先として使用する。
 - 拡張機能のサポート窓口: GitHub Issues（上記Support URL）
+
+## 日本語 Store Listing
 
 ## 短い説明（132文字以内）
 
@@ -44,7 +47,7 @@ ChatRivetは、チャットID、左サイドバーに表示されるチャット
 
 対応サイトは `https://chatgpt.com/*` のみです。ChatRivetはOpenAIまたはChatGPTの公式拡張機能ではありません。ChatGPT側のUI変更により、表示できなくなる場合があります。
 
-## Privacy practices 入力案
+## 日本語 Privacy practices 入力案
 
 ### Single purpose
 
@@ -72,7 +75,64 @@ Developer Dashboardでは「Web history」「Website content」「User activity�
 
 ストア掲載文とPrivacy practicesで、チャットID・サイドバー上のタイトル・ピン留め日時・ユーザーが選択したピンの色・pins配列順による表示順をローカル保存し、独自ピン一覧の表示・移動・解除・色分け・並べ替えのためだけに使用することを明示する。公開前にDeveloper Dashboard上の同意・認証項目を確認し、必要な同意取得を完了する。
 
-## 審査テスト手順案
+## English Store Listing
+
+### Name
+
+ChatRivet
+
+### Short description
+
+Add a locally saved custom pin list to the ChatGPT sidebar for quick access to important conversations.
+
+### Detailed description
+
+ChatRivet adds a custom pin list to the ChatGPT left sidebar so you can quickly return to conversations you use often.
+
+When you add the currently open conversation, ChatRivet displays it near the chat history in a list that is separate from ChatGPT's official Pinned section. An official Pinned section is not required. ChatRivet uses an available safe sidebar position and does not force insertion when no safe position is available. Adding a conversation to ChatRivet does not remove it from the official Recent list. The same conversation remains available in both lists, the official Recent `...` menu continues to work, and removing a ChatRivet pin does not affect the official history.
+
+Key features
+
+- Add the currently open ChatGPT conversation to a custom list
+- Open a conversation from the ChatRivet list
+- Remove a pin at any time
+- Organize pins with eight fixed colors
+- Reorder pins manually with a dedicated drag handle
+- Save pin details, colors, and display order in Chrome local storage
+- Follow ChatGPT page navigation and sidebar redraws
+- Follow light and dark themes
+
+Privacy
+
+ChatRivet stores only the conversation ID, the title shown in the ChatGPT sidebar, the time the pin was added, the user-selected pin color, and the user-defined pin order in Chrome local storage. Storage is scoped to the Chrome profile, not the ChatGPT account. If multiple ChatGPT accounts are used in the same Chrome profile, they share the same ChatRivet pin list. ChatRivet does not transmit this data to external servers and does not collect or store conversation bodies, message input, cookies, or authentication information. It does not use data for advertising, analytics, tracking, or sale.
+
+ChatRivet runs only on `https://chatgpt.com/*`. It is not an official OpenAI or ChatGPT extension. Changes to the ChatGPT interface may affect availability.
+
+### Privacy practices
+
+#### Single purpose
+
+Add a local-only custom pin list to the ChatGPT left sidebar so users can quickly open conversations they choose.
+
+#### Permission justification: storage
+
+The `storage` permission is used to save each pinned conversation ID, sidebar title, pin timestamp, user-selected color, and user-defined display order in Chrome local storage so the custom pin list remains available after the browser restarts.
+
+#### Host access justification: https://chatgpt.com/*
+
+ChatRivet's single purpose is to display and operate its custom pin list inside the ChatGPT left sidebar. Its content script therefore runs only on `https://chatgpt.com/*`.
+
+#### Remote code
+
+No, I am not using remote code.
+
+#### Data usage
+
+For conversations the user pins, ChatRivet stores the conversation ID, the title shown in the ChatGPT sidebar, the pin timestamp, the selected color, and the array order used for display. The data stays in the Chrome profile. ChatRivet does not transmit, sell, advertise with, analyze, or track this data.
+
+Select `Web history`, `Website content`, and `User activity` in Developer Dashboard, then verify the available choices immediately before submission.
+
+## Test instructions / 審査テスト手順案（English）
 
 No ChatRivet-specific account, paid ChatGPT plan, or special setup is required.
 Any standard ChatGPT account with at least one existing conversation can be used.
@@ -99,3 +159,11 @@ Additional feature checks:
 - 1280x800 PNGの実機スクリーンショット（最低1枚、最大5枚。3枚を予定）
 - 任意: 1400x560 PNGまたはJPEGのマーキー画像
 - 任意: 機能紹介YouTube動画
+
+### Shared screenshots for Japanese and English
+
+The following current screenshots are shared across the Japanese and English Store Listings. Do not upload the older v1.1.0 screenshots.
+
+- `store-assets/ChatRivet-v1.2.0-store-01-basic.png`
+- `store-assets/ChatRivet-v1.2.0-store-02-organize.png`
+- `store-assets/ChatRivet-v1.2.0-store-03-recent-coexist.png`

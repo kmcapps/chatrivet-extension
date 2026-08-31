@@ -1,0 +1,8 @@
+{
+  "extensionName": {
+    "message": "ChatRivet"
+  },
+  "extensionDescription": {
+    "message": "Add a locally saved custom pin list to the ChatGPT sidebar for quick access to important conversations."
+  }
+}

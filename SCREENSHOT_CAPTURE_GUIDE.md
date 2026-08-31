@@ -13,13 +13,13 @@ Chrome Web Store用に、1280x800 PNGを3枚用意する。撮影はChatRivetを
 
 ## 1. 自然な統合表示
 
-目的: ChatRivetがChatGPTの左サイドバーへ自然に統合されることを示す。
+目的: ChatRivetがChatGPTの左サイドバーへ自然に統合され、現在のチャットを追加できることを示す。
 
-- 公式「ピン留め」の下、公式「最近」の上にChatRivetが表示されている。
-- ChatRivetにはテスト用チャットを1件表示する。
-- 公式「最近」は閉じた状態にする。
+- ChatRivetが公式のチャット履歴付近の安全な位置に表示されている。
+- ChatRivet見出しと、現在のチャットを追加する`+`ボタンが見える。
+- 公式「ピン留め」がない環境でもChatRivetを表示できる仕様と矛盾しない構図にする。
 
-推奨ファイル名: `01-sidebar-integration-1280x800.png`
+正式ファイル名: `store-assets/ChatRivet-v1.2.0-store-01-basic.png`
 
 ## 2. 複数ピンの利用例
 
@@ -29,7 +29,7 @@ Chrome Web Store用に、1280x800 PNGを3枚用意する。撮影はChatRivetを
 - 追加ボタンが見える状態にする。
 - 現在開いているテスト用チャットが分かる状態にする。
 
-推奨ファイル名: `02-multiple-pins-1280x800.png`
+正式ファイル名: `store-assets/ChatRivet-v1.2.0-store-02-organize.png`
 
 ## 3. 公式「最近」との共存
 
@@ -41,7 +41,11 @@ Chrome Web Store用に、1280x800 PNGを3枚用意する。撮影はChatRivetを
 - 公式「最近」の「…」メニューが利用できることが分かる状態にする。
 - 公式「最近」の見出しとChatRivetが別の独立セクションであることが分かる構図にする。
 
-推奨ファイル名: `03-recent-coexistence-1280x800.png`
+正式ファイル名: `store-assets/ChatRivet-v1.2.0-store-03-recent-coexist.png`
+
+## Store Listingでの共通利用
+
+この3枚は日本語と英語のStore Listingで共通利用する。画像内のUIを言語ごとに加工したり、旧v1.1.0画像と混在させたりしない。
 
 ## 撮影前の最終確認
 
