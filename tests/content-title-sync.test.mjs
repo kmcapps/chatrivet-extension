@@ -14,7 +14,28 @@ function makeAnchor(href, textContent, insideChatRivet = false) {
     closest(selector) {
       return insideChatRivet && selector === '#chatdock-root' ? {} : null;
     },
+    querySelectorAll() {
+      return [];
+    },
   };
+}
+
+function makeProjectAnchor(href, title, projectName) {
+  const anchor = makeAnchor(href, `${title}${projectName}`);
+  const makeTextElement = (textContent, classes) => ({
+    textContent,
+    classList: {
+      contains(name) { return classes.includes(name); },
+    },
+  });
+  const titleElement = makeTextElement(title, ['min-w-0', 'flex-1', 'truncate']);
+  const projectElement = makeTextElement(projectName, ['text-token-text-tertiary', 'min-w-0', 'flex-1', 'truncate', 'text-xs']);
+  anchor.querySelectorAll = (selector) => selector === '*' ? [titleElement, projectElement] : [];
+  anchor.setProjectTitle = (value) => {
+    titleElement.textContent = value;
+    anchor.textContent = `${value}${projectName}`;
+  };
+  return anchor;
 }
 
 function selectAnchors(anchors, selector) {
@@ -527,6 +548,58 @@ test('adds a Project conversation once with its official title and removes it th
 
   await harness.api.removePin('chat456');
   assert.deepEqual(harness.getStoredPins(), []);
+});
+
+test('adds a Project conversation using only its dedicated chat title element', async () => {
+  const projectAnchor = makeProjectAnchor('/g/project123/c/chat456', '開発ログを整理', '開発ログ');
+  const harness = await loadContent({
+    anchors: [projectAnchor],
+    pathname: '/g/project123/c/chat456',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.deepEqual(harness.getStoredPins().map(({ pinnedAt, ...pin }) => ({ ...pin, pinnedAt: Number.isFinite(pinnedAt) })), [
+    { id: 'chat456', title: '開発ログを整理', pinnedAt: true },
+  ]);
+});
+
+test('syncs a Project conversation from its dedicated title element without appending the Project name', async () => {
+  const projectAnchor = makeProjectAnchor('/c/chat456', 'Research Work Notes', 'Work');
+  const original = [{ id: 'chat456', title: 'Old Project title', pinnedAt: 10, color: 'blue' }];
+  const harness = await loadContent({ anchors: [projectAnchor], pins: original });
+
+  projectAnchor.setProjectTitle('Updated Work Notes');
+  await harness.api.syncOfficialTitles(original);
+
+  assert.deepEqual(harness.getStoredPins(), [
+    { id: 'chat456', title: 'Updated Work Notes', pinnedAt: 10, color: 'blue' },
+  ]);
+});
+
+test('keeps the saved title when a structured Project link has no separable title element', async () => {
+  const projectAnchor = makeAnchor('/c/chat456', 'Updated title · Project Alpha');
+  projectAnchor.querySelectorAll = (selector) => selector === '*' ? [{
+    textContent: 'Updated title · Project Alpha',
+    classList: { contains() { return false; } },
+  }] : [];
+  const original = [{ id: 'chat456', title: 'Updated title', pinnedAt: 10, color: 'green' }];
+  const harness = await loadContent({ anchors: [projectAnchor], pins: original });
+
+  assert.equal(harness.api.getSyncedPins(original), original);
+  assert.equal(harness.getSetCalls(), 0);
+});
+
+test('keeps the existing title limit when extracting a long Project chat title', async () => {
+  const longTitle = `長いProject title ${'A'.repeat(140)}`;
+  const projectAnchor = makeProjectAnchor('/g/project123/c/chat456', longTitle, 'Project Alpha');
+  const harness = await loadContent({
+    anchors: [projectAnchor],
+    pathname: '/g/project123/c/chat456',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.equal(harness.getStoredPins()[0].title, longTitle.slice(0, 120));
+  assert.equal(harness.getStoredPins()[0].title.includes('Project Alpha'), false);
 });
 
 test('keeps the normal conversation add path working', async () => {

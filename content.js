@@ -128,13 +128,26 @@
     return getOfficialSidebarTitle(id) || '無題のチャット';
   }
 
+  function getOfficialLinkTitle(candidate) {
+    const elements = [...candidate.querySelectorAll('*')];
+    const titleElement = elements.find((element) => (
+      element.classList.contains('min-w-0') &&
+      element.classList.contains('flex-1') &&
+      element.classList.contains('truncate') &&
+      !element.classList.contains('text-token-text-tertiary')
+    ));
+    if (titleElement) return normalizeText(titleElement.textContent).slice(0, TITLE_LIMIT);
+    if (elements.some((element) => normalizeText(element.textContent))) return '';
+    return normalizeText(candidate.textContent).slice(0, TITLE_LIMIT);
+  }
+
   function getOfficialSidebarTitles(container, id) {
     let matched = false;
     const titles = new Set();
     for (const candidate of container.querySelectorAll('a[href]')) {
       if (candidate.closest(`#${ROOT_ID}`) || getChatIdFromHref(candidate.getAttribute('href') || '') !== id) continue;
       matched = true;
-      const title = normalizeText(candidate.textContent).slice(0, TITLE_LIMIT);
+      const title = getOfficialLinkTitle(candidate);
       if (title) titles.add(title);
     }
     return { matched, titles };
