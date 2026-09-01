@@ -13,7 +13,7 @@ test('manifest exposes Japanese and English metadata without expanding permissio
   const japanese = await readJson('_locales/ja/messages.json');
   const english = await readJson('_locales/en/messages.json');
 
-  assert.equal(manifest.version, '1.2.0');
+  assert.equal(manifest.version, '1.3.0');
   assert.equal(manifest.default_locale, 'ja');
   assert.equal(manifest.name, '__MSG_extensionName__');
   assert.equal(manifest.description, '__MSG_extensionDescription__');
