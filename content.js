@@ -130,13 +130,26 @@
 
   function getOfficialLinkTitle(candidate) {
     const elements = [...candidate.querySelectorAll('*')];
-    const titleElement = elements.find((element) => (
+    const projectTitleElement = elements.find((element) => (
       element.classList.contains('min-w-0') &&
       element.classList.contains('flex-1') &&
       element.classList.contains('truncate') &&
       !element.classList.contains('text-token-text-tertiary')
     ));
-    if (titleElement) return normalizeText(titleElement.textContent).slice(0, TITLE_LIMIT);
+    if (projectTitleElement) return normalizeText(projectTitleElement.textContent).slice(0, TITLE_LIMIT);
+
+    const hasProjectMetadata = elements.some((element) => (
+      element.classList.contains('text-token-text-tertiary') &&
+      normalizeText(element.textContent)
+    ));
+    if (!hasProjectMetadata) {
+      const recentTitleElement = elements.find((element) => (
+        element.classList.contains('truncate') &&
+        normalizeText(element.textContent)
+      ));
+      if (recentTitleElement) return normalizeText(recentTitleElement.textContent).slice(0, TITLE_LIMIT);
+    }
+
     if (elements.some((element) => normalizeText(element.textContent))) return '';
     return normalizeText(candidate.textContent).slice(0, TITLE_LIMIT);
   }

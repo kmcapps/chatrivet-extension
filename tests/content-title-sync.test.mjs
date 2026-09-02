@@ -38,6 +38,25 @@ function makeProjectAnchor(href, title, projectName) {
   return anchor;
 }
 
+function makeCurrentRecentAnchor(href, title) {
+  const anchor = makeAnchor(href, title);
+  const makeTextElement = (textContent, classes) => ({
+    textContent,
+    classList: {
+      contains(name) { return classes.includes(name); },
+    },
+  });
+  const titleWrapper = makeTextElement(title, [
+    'truncate',
+    '[&:has([data-marquee-text])]:min-w-0',
+    '[&:has([data-marquee-text])]:flex-1',
+  ]);
+  const titleText = makeTextElement(title, []);
+  const trailingActions = makeTextElement('', ['text-token-text-tertiary']);
+  anchor.querySelectorAll = (selector) => selector === '*' ? [titleWrapper, titleText, trailingActions] : [];
+  return anchor;
+}
+
 function selectAnchors(anchors, selector) {
   if (selector === 'a[href]') return anchors;
   if (selector === 'a[href^="/c/"]') return anchors.filter((anchor) => (anchor.getAttribute('href') || '').startsWith('/c/'));
@@ -589,6 +608,26 @@ test('keeps the saved title when a structured Project link has no separable titl
   assert.equal(harness.getSetCalls(), 0);
 });
 
+test('uses the fallback when adding a structured Project link with no separable title element', async () => {
+  const projectAnchor = makeAnchor('/g/project123/c/chat456', 'Updated title · Project Alpha');
+  const projectWrapper = {
+    textContent: 'Updated title · Project Alpha',
+    classList: { contains(name) { return name === 'truncate'; } },
+  };
+  const projectMetadata = {
+    textContent: 'Project Alpha',
+    classList: { contains(name) { return name === 'text-token-text-tertiary'; } },
+  };
+  projectAnchor.querySelectorAll = (selector) => selector === '*' ? [projectWrapper, projectMetadata] : [];
+  const harness = await loadContent({
+    anchors: [projectAnchor],
+    pathname: '/g/project123/c/chat456',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.equal(harness.getStoredPins()[0].title, '無題のチャット');
+});
+
 test('keeps the existing title limit when extracting a long Project chat title', async () => {
   const longTitle = `長いProject title ${'A'.repeat(140)}`;
   const projectAnchor = makeProjectAnchor('/g/project123/c/chat456', longTitle, 'Project Alpha');
@@ -612,6 +651,32 @@ test('keeps the normal conversation add path working', async () => {
   assert.equal(await harness.api.addCurrentPin(), true);
   assert.deepEqual(harness.getStoredPins().map(({ pinnedAt, ...pin }) => ({ ...pin, pinnedAt: Number.isFinite(pinnedAt) })), [
     { id: 'chat-normal', title: 'Normal conversation title', pinnedAt: true },
+  ]);
+});
+
+test('adds a normal Recent conversation from the current structured title element', async () => {
+  const harness = await loadContent({
+    recentRows: [makeRecentRow(makeCurrentRecentAnchor('/c/chat-normal', '違いを比較'))],
+    pathname: '/c/chat-normal',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.deepEqual(harness.getStoredPins().map(({ pinnedAt, ...pin }) => ({ ...pin, pinnedAt: Number.isFinite(pinnedAt) })), [
+    { id: 'chat-normal', title: '違いを比較', pinnedAt: true },
+  ]);
+});
+
+test('syncs a saved pin from the current structured Recent title element', async () => {
+  const original = [{ id: 'chat-normal', title: '無題のチャット', pinnedAt: 10, color: 'blue' }];
+  const harness = await loadContent({
+    pins: original,
+    recentRows: [makeRecentRow(makeCurrentRecentAnchor('/c/chat-normal', '違いを比較'))],
+  });
+
+  await harness.api.syncOfficialTitles(original, harness.recentSection);
+
+  assert.deepEqual(harness.getStoredPins(), [
+    { id: 'chat-normal', title: '違いを比較', pinnedAt: 10, color: 'blue' },
   ]);
 });
 
