@@ -1,6 +1,6 @@
-# ChatRivet v1.3.0 リリース準備チェックリスト
+# ChatRivet v1.3.1 リリース準備チェックリスト
 
-このチェックリストは、公開済みv1.2.0の次版として、現在のmainを基に日本語・英語Store Listing対応を含むv1.3.0を準備し、Chrome Web Storeへ提出するために使用します。Dashboard変更・審査送信は、ユーザーの最終承認後に行います。
+このチェックリストは、公開済みv1.3.0の互換性修正版として、現在のmainを基にChatGPT側DOM変更へ対応したv1.3.1を準備し、Chrome Web Storeへ提出するために使用します。Dashboard変更・審査送信は、ユーザーの最終承認後に行います。
 
 ## 開発者アカウント
 
@@ -32,12 +32,13 @@
 
 ## 申請版ソース
 
-- [x] `manifest.json`の`version`を`1.3.0`へ更新する。
+- [x] `manifest.json`の`version`を`1.3.1`へ更新する。
 - [x] `default_locale`が`ja`で、manifestのName / Descriptionが`__MSG_*__`参照であることを確認する。
 - [x] `node --check content.js`、manifest JSON検証、`git diff --check`を実行する。
 - [x] Manifestの権限が`storage`のみ、対象が`https://chatgpt.com/*`のみであることを確認する。
 - [x] 日本語・英語localeのJSON、キー、manifest message参照の整合性を自動テストする。
-- [x] i18n、色分け、手動並べ替え、mount fallbackを含む申請版の全回帰テストを行う。
+- [x] 通常Recentの現在DOMから正しいチャットタイトルを取得し、`無題のチャット`へ誤ってfallbackしないことを自動テスト・実機確認する。
+- [x] Projectタイトル分離、安全側fallback、Recent共存を含む申請版の全29件回帰テストを行う。
 - [ ] 公式Pinnedなし、pins 0件、既存チャット`/c/{id}`の初回操作を再確認する。
 - [ ] Chrome拡張機能管理画面に新規エラーがないことを確認する。
 - [x] 申請用変更だけを最終Diffレビューする。
@@ -62,7 +63,7 @@
 
 ## 提出ZIP
 
-- [x] `dist/ChatRivet-1.3.0.zip`を新規作成する。
+- [x] `dist/ChatRivet-1.3.1.zip`を新規作成する。
 - [x] ZIPのルートに実行に必要な次のファイルだけが含まれることを確認する。
   - `manifest.json`
   - `content.js`
@@ -74,7 +75,7 @@
   - `_locales/ja/messages.json`
   - `_locales/en/messages.json`
 - [x] `.git`、文書、`store-assets/`、`tools/`、スクリーンショット、テスト・モックをZIPへ含めていないことを確認する。
-- [x] ZIP内Manifestが有効で、versionが`1.3.0`であることを確認する。
+- [x] ZIP内Manifestが有効で、versionが`1.3.1`であることを確認する。
 - [x] ZIP内実行ファイルと現在の申請準備ソースのハッシュが一致することを確認する。
 - [ ] ZIPを別の場所へ展開し、展開した正確な提出物をChromeへ読み込んで実機テストする。
 
@@ -83,15 +84,15 @@
 - [ ] Commit直前の`git status`とDiffを確認する。
 - [ ] ユーザー承認後に申請版Commitを作成する。
 - [ ] 検証済みZIPが申請版Commitと一致することを確認する。
-- [ ] 問題がなければ申請版Commitへ注釈付きtag `v1.3.0`を作成する。
+- [ ] 問題がなければ申請版Commitへ注釈付きtag `v1.3.1`を作成する。
 - [ ] release branchをPushし、安全にmainへ統合する。
-- [ ] mainと`v1.3.0` tagをoriginへPushする。
-- [ ] ローカルmain、origin/main、`v1.3.0`が意図したCommitを指すことを確認する。
+- [ ] mainと`v1.3.1` tagをoriginへPushする。
+- [ ] ローカルmain、origin/main、`v1.3.1`が意図したCommitを指すことを確認する。
 
 ## Dashboard最終監査・再提出
 
 - [ ] 新ZIPをChrome Web Store Developer Dashboardへアップロードする。
-- [ ] Dashboardに表示されるversionが`1.3.0`であることを確認する。
+- [ ] Dashboardに表示されるversionが`1.3.1`であることを確認する。
 - [ ] 日本語・英語Store Listing、Privacy practices、販売地域、テスト手順、掲載素材を最終監査する。
 - [ ] Red Potassium拒否対象だった追加・表示・移動・解除の再現手順が明確であることを確認する。
 - [ ] ユーザーの最終承認を得る。
