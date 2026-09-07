@@ -123,6 +123,11 @@ class FakeElement {
     const index = this.parentElement.children.indexOf(this);
     return this.parentElement.children[index + 1] || null;
   }
+  get isConnected() {
+    let current = this;
+    while (current.parentElement) current = current.parentElement;
+    return current.tagName === 'HTML';
+  }
 
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
@@ -207,6 +212,11 @@ class FakeElement {
   setPointerCapture() {}
   releasePointerCapture() {}
   focus() {}
+
+  click() {
+    const event = { preventDefault() {}, stopPropagation() {}, target: this };
+    for (const listener of this.eventListeners.get('click') || []) listener(event);
+  }
 }
 
 function matchesSelector(element, selector) {
@@ -248,6 +258,9 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
   nav.appendChild(historySection);
   const documentListeners = new Map();
   return {
+    dispatchDocumentEvent(type, target = documentElement) {
+      documentListeners.get(type)?.({ target, type });
+    },
     document: {
       addEventListener(type, listener) { documentListeners.set(type, listener); },
       createElement(tagName) { return new FakeElement(tagName); },
@@ -266,11 +279,26 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
   };
 }
 
-async function loadRenderedContent({ historyHref = '/c/history-chat', includeRecent = true, navAriaLabel = 'Chat history', pathname = '/c/current', pins = [] } = {}) {
+async function loadRenderedContent({
+  historyHref = '/c/history-chat',
+  holdStorageGetCalls = [],
+  includeRecent = true,
+  navAriaLabel = 'Chat history',
+  pathname = '/c/current',
+  pins = [],
+} = {}) {
   const source = await readFile(contentPath, 'utf8');
   let storageState = { chatdockState: { version: 1, pins } };
   const timers = new Map();
   let nextTimerId = 1;
+  let now = 0;
+  let storageGetCalls = 0;
+  let storageSetCalls = 0;
+  const heldStorageGets = [];
+  const heldCallNumbers = new Set(holdStorageGetCalls);
+  let mutationCallback = null;
+  const windowListeners = new Map();
+  const storageListeners = [];
   const renderedDocument = makeRenderedDocument({ historyHref, includeRecent, navAriaLabel });
   const location = {
     href: `https://chatgpt.com${pathname}`,
@@ -290,10 +318,23 @@ async function loadRenderedContent({ historyHref = '/c/history-chat', includeRec
     chrome: {
       storage: {
         local: {
-          async get() { return structuredClone(storageState); },
-          async set(value) { storageState = { ...storageState, ...structuredClone(value) }; },
+          async get() {
+            storageGetCalls += 1;
+            const snapshot = structuredClone(storageState);
+            if (heldCallNumbers.has(storageGetCalls)) {
+              await new Promise((resolve) => heldStorageGets.push(resolve));
+            }
+            return snapshot;
+          },
+          async set(value) {
+            storageSetCalls += 1;
+            storageState = { ...storageState, ...structuredClone(value) };
+            for (const listener of storageListeners) {
+              listener({ chatdockState: { newValue: structuredClone(storageState.chatdockState) } }, 'local');
+            }
+          },
         },
-        onChanged: { addListener() {} },
+        onChanged: { addListener(listener) { storageListeners.push(listener); } },
       },
     },
     console,
@@ -301,16 +342,23 @@ async function loadRenderedContent({ historyHref = '/c/history-chat', includeRec
     Element: FakeElement,
     history,
     location,
-    MutationObserver: class { observe() {} },
+    MutationObserver: class {
+      constructor(callback) { mutationCallback = callback; }
+      observe() {}
+    },
     Node: { DOCUMENT_POSITION_PRECEDING: 2, ELEMENT_NODE: 1 },
     structuredClone,
     URL,
     window: {
-      addEventListener() {},
+      addEventListener(type, listener) {
+        const listeners = windowListeners.get(type) || [];
+        listeners.push(listener);
+        windowListeners.set(type, listeners);
+      },
       clearTimeout(id) { timers.delete(id); },
-      setTimeout(callback) {
+      setTimeout(callback, delay = 0) {
         const id = nextTimerId++;
-        timers.set(id, callback);
+        timers.set(id, { callback, dueAt: now + delay });
         return id;
       },
     },
@@ -318,30 +366,110 @@ async function loadRenderedContent({ historyHref = '/c/history-chat', includeRec
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'content.js' });
 
+  const flushMicrotasks = async () => {
+    for (let tick = 0; tick < 12; tick += 1) await Promise.resolve();
+  };
+
+  const runDueTimers = async () => {
+    const due = [...timers.entries()].filter(([, timer]) => timer.dueAt <= now);
+    for (const [id, timer] of due) {
+      if (!timers.has(id)) continue;
+      timers.delete(id);
+      timer.callback();
+    }
+    await flushMicrotasks();
+  };
+
   const flushRender = async () => {
     for (let pass = 0; pass < 10 && timers.size; pass += 1) {
-      const callbacks = [...timers.values()];
-      timers.clear();
-      for (const callback of callbacks) callback();
-      for (let tick = 0; tick < 6; tick += 1) await Promise.resolve();
+      now = Math.max(now, ...[...timers.values()].map((timer) => timer.dueAt));
+      await runDueTimers();
     }
   };
 
+  const getUiSnapshot = () => {
+    const root = renderedDocument.document.getElementById('chatdock-root');
+    if (!root) return null;
+    return {
+      addVisible: Boolean(root.querySelector('.chatdock-add')),
+      rootCount: renderedDocument.document.querySelectorAll('#chatdock-root').length,
+      rows: root.querySelectorAll('.chatdock-row').map((row) => ({
+        color: row.querySelector('.chatdock-color-button')?.dataset.color || null,
+        current: row.classList.contains('chatdock-current'),
+        id: row.dataset.chatdockPinId,
+        title: row.querySelector('.chatdock-link')?.textContent || '',
+      })),
+    };
+  };
+
+  const emitMutation = (target = renderedDocument.nav) => {
+    mutationCallback?.([{ addedNodes: [], removedNodes: [], target }]);
+  };
+
+  const navigatePageWorld = (url, { target = renderedDocument.document.documentElement } = {}) => {
+    setLocation(url);
+    emitMutation(target);
+  };
+
   return {
+    advanceTime: async (milliseconds) => {
+      now += milliseconds;
+      await runDueTimers();
+    },
+    dispatchWindowEvent(type) {
+      for (const listener of windowListeners.get(type) || []) listener({ type });
+    },
+    dispatchDocumentEvent: renderedDocument.dispatchDocumentEvent,
+    appendDuplicateRoot() {
+      const duplicate = new FakeElement('section');
+      duplicate.id = 'chatdock-root';
+      renderedDocument.nav.appendChild(duplicate);
+    },
+    clickAdd() {
+      renderedDocument.document.querySelector('.chatdock-add')?.click();
+    },
+    clickRemove(id) {
+      const row = renderedDocument.document.querySelectorAll('.chatdock-row').find((candidate) => candidate.dataset.chatdockPinId === id);
+      row?.querySelector('.chatdock-remove')?.click();
+    },
+    emitNavMutation: () => emitMutation(renderedDocument.nav),
+    emitRootMutation: () => emitMutation(renderedDocument.document.getElementById('chatdock-root')),
     flushRender,
+    flushMicrotasks,
     getAddButton: () => renderedDocument.document.querySelector('.chatdock-add'),
     getHistoryMenu: () => renderedDocument.historyMenu,
     getHistoryRow: () => renderedDocument.historyRow,
     getRoot: () => renderedDocument.document.getElementById('chatdock-root'),
+    getSetCalls: () => storageSetCalls,
+    getStoredPins: () => structuredClone(storageState.chatdockState.pins),
+    getTimerCount: () => timers.size,
+    getUiSnapshot,
     history,
+    navigatePageWorld,
+    releaseStorageGet: () => heldStorageGets.shift()?.(),
+    runNextTimer: async () => {
+      if (!timers.size) return;
+      const [id, timer] = [...timers.entries()].sort((left, right) => left[1].dueAt - right[1].dueAt)[0];
+      timers.delete(id);
+      now = Math.max(now, timer.dueAt);
+      timer.callback();
+      await flushMicrotasks();
+    },
+    setLocationOnly: setLocation,
+    setStoredPins(pinsValue) {
+      storageState = { chatdockState: { version: 1, pins: structuredClone(pinsValue) } };
+      for (const listener of storageListeners) {
+        listener({ chatdockState: { newValue: structuredClone(storageState.chatdockState) } }, 'local');
+      }
+    },
   };
 }
 
 async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/current', pauseGetBatch = 0, pins = [], recentRows = [] } = {}) {
   const source = await readFile(contentPath, 'utf8');
   const instrumented = source.replace(
-    /  observeNavigation\(\);\r?\n  scheduleRender\(\);\r?\n\}\)\(\);\s*$/,
-    '  observeNavigation();\n  globalThis.__chatdockTest = { addCurrentPin: typeof addCurrentPin === "function" ? addCurrentPin : undefined, getChatId, getSyncedPins, removePin, syncOfficialTitles, updatePins };\n})();',
+    /  scheduleRender\(\);\r?\n\}\)\(\);\s*$/,
+    '  globalThis.__chatdockTest = { addCurrentPin: typeof addCurrentPin === "function" ? addCurrentPin : undefined, getChatId, getSyncedPins, movePinBefore, removePin, setPinColor, syncOfficialTitles, updatePins };\n})();',
   );
   assert.notEqual(instrumented, source, 'test export hook must be installed');
 
@@ -813,4 +941,317 @@ test('observes sidebar text-node changes so official title edits can schedule a 
   const harness = await loadContent();
 
   assert.equal(harness.getObserverOptions().characterData, true);
+});
+
+test('F5 initialization and page-world SPA navigation derive the same final UI', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1, color: 'blue' },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2, color: 'green' },
+  ];
+  const initialized = await loadRenderedContent({ pathname: '/c/chat-b', pins });
+  await initialized.flushRender();
+
+  const navigated = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await navigated.flushRender();
+  navigated.navigatePageWorld('/c/chat-b');
+  await navigated.flushRender();
+
+  assert.deepEqual(navigated.getUiSnapshot(), initialized.getUiSnapshot());
+});
+
+test('does not repaint an old route after a newer route was recognized during storage read', async () => {
+  const harness = await loadRenderedContent({
+    holdStorageGetCalls: [1],
+    pathname: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.runNextTimer();
+
+  harness.navigatePageWorld('/c/chat-b');
+  harness.emitNavMutation();
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+
+  const snapshot = harness.getUiSnapshot();
+  assert.equal(Boolean(snapshot?.rows.some((row) => row.id === 'chat-a' && row.current)), false);
+});
+
+test('does not save a title collected from a route invalidated during queued storage work', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/history-chat',
+    holdStorageGetCalls: [2],
+    pathname: '/c/chat-a',
+    pins: [{ id: 'history-chat', title: 'Saved title', pinnedAt: 1 }],
+  });
+  await harness.runNextTimer();
+
+  harness.navigatePageWorld('/c/chat-b');
+  harness.emitNavMutation();
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+
+  assert.equal(harness.getStoredPins()[0].title, 'Saved title');
+});
+
+test('does not save a title collected before a same-route DOM title change', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/history-chat',
+    holdStorageGetCalls: [2],
+    pathname: '/c/chat-a',
+    pins: [{ id: 'history-chat', title: 'Saved title', pinnedAt: 1 }],
+  });
+  await harness.runNextTimer();
+
+  harness.getHistoryRow().querySelector('a').textContent = 'Latest title';
+  harness.emitNavMutation();
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+  await harness.flushRender();
+
+  assert.equal(harness.getStoredPins()[0].title, 'Latest title');
+  assert.equal(harness.getSetCalls(), 1, 'only the fresh DOM title may be persisted');
+});
+
+test('mutation storms cannot postpone the first reconcile indefinitely', async () => {
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a' });
+
+  for (let index = 0; index < 10; index += 1) {
+    harness.emitNavMutation();
+    await harness.advanceTime(100);
+  }
+
+  assert.ok(harness.getRoot(), 'a bounded scheduler must render while mutations continue');
+});
+
+test('sidebar mutations during a delayed storage read do not starve that reconcile', async () => {
+  const harness = await loadRenderedContent({
+    holdStorageGetCalls: [1],
+    pathname: '/c/chat-a',
+  });
+  await harness.runNextTimer();
+
+  for (let index = 0; index < 20; index += 1) harness.emitNavMutation();
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+
+  assert.ok(harness.getRoot(), 'DOM-only notifications must not invalidate an awaited storage snapshot');
+});
+
+test('popstate reconciles browser back and forward destinations from the current URL', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+  ];
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await harness.flushRender();
+
+  harness.setLocationOnly('/c/chat-b');
+  harness.dispatchWindowEvent('popstate');
+  await harness.flushRender();
+  assert.equal(harness.getUiSnapshot().rows.find((row) => row.id === 'chat-b').current, true);
+
+  harness.setLocationOnly('/c/chat-a');
+  harness.dispatchWindowEvent('popstate');
+  await harness.flushRender();
+  assert.equal(harness.getUiSnapshot().rows.find((row) => row.id === 'chat-a').current, true);
+});
+
+test('conversation ID assignment after a new-chat route shows the correct add action', async () => {
+  const harness = await loadRenderedContent({ pathname: '/' });
+  await harness.flushRender();
+  assert.equal(harness.getAddButton(), null);
+
+  harness.navigatePageWorld('/c/new-chat');
+  await harness.flushRender();
+
+  assert.ok(harness.getAddButton());
+});
+
+test('a bounded post-interaction probe detects a delayed page-world URL-only change', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+  ];
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await harness.flushRender();
+
+  harness.dispatchDocumentEvent('click');
+  await harness.advanceTime(0);
+  harness.setLocationOnly('/c/chat-b');
+  await harness.advanceTime(500);
+  await harness.flushRender();
+
+  assert.equal(harness.getUiSnapshot().rows.find((row) => row.id === 'chat-b').current, true);
+});
+
+test('a later interaction refreshes the bounded URL probe window', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+  ];
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await harness.flushRender();
+
+  harness.dispatchDocumentEvent('click');
+  await harness.advanceTime(1400);
+  harness.dispatchDocumentEvent('click');
+  await harness.advanceTime(200);
+  harness.setLocationOnly('/c/chat-b');
+  await harness.advanceTime(400);
+  await harness.flushRender();
+
+  assert.equal(harness.getUiSnapshot().rows.find((row) => row.id === 'chat-b').current, true);
+  assert.equal(harness.getTimerCount(), 0, 'the refreshed probe window must still stop');
+});
+
+test('an interaction still probes after immediately discovering an earlier URL change', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+    { id: 'chat-c', title: 'Gamma', pinnedAt: 3 },
+  ];
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await harness.flushRender();
+
+  harness.setLocationOnly('/c/chat-b');
+  harness.dispatchDocumentEvent('click');
+  await harness.advanceTime(200);
+  harness.setLocationOnly('/c/chat-c');
+  await harness.advanceTime(400);
+  await harness.flushRender();
+
+  assert.equal(harness.getUiSnapshot().rows.find((row) => row.id === 'chat-c').current, true);
+  assert.equal(harness.getTimerCount(), 0, 'the interaction probe must remain finite');
+});
+
+test('rapid page-world navigation coalesces to the latest A destination', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+    { id: 'chat-c', title: 'Gamma', pinnedAt: 3 },
+  ];
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a', pins });
+  await harness.flushRender();
+
+  harness.navigatePageWorld('/c/chat-b');
+  harness.navigatePageWorld('/c/chat-c');
+  harness.navigatePageWorld('/c/chat-a');
+  await harness.flushRender();
+
+  assert.deepEqual(harness.getUiSnapshot().rows.filter((row) => row.current).map((row) => row.id), ['chat-a']);
+});
+
+test('sidebar redraw remounts one root and removes duplicate roots', async () => {
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a' });
+  await harness.flushRender();
+  harness.getRoot().remove();
+  harness.appendDuplicateRoot();
+  harness.appendDuplicateRoot();
+
+  harness.emitNavMutation();
+  await harness.flushRender();
+
+  assert.equal(harness.getUiSnapshot().rootCount, 1);
+  assert.ok(harness.getAddButton());
+});
+
+test('storage changes reconcile pin order, color, and current state without a route change', async () => {
+  const harness = await loadRenderedContent({ pathname: '/c/chat-b' });
+  await harness.flushRender();
+
+  harness.setStoredPins([
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2, color: 'purple' },
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1, color: 'orange' },
+  ]);
+  await harness.flushRender();
+
+  assert.deepEqual(harness.getUiSnapshot().rows, [
+    { color: 'purple', current: true, id: 'chat-b', title: 'Beta' },
+    { color: 'orange', current: false, id: 'chat-a', title: 'Alpha' },
+  ]);
+});
+
+test('remove action keeps its clicked pin ID when the route changes during storage read', async () => {
+  const harness = await loadRenderedContent({
+    holdStorageGetCalls: [2],
+    pathname: '/c/chat-a',
+    pins: [
+      { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+      { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+    ],
+  });
+  await harness.flushRender();
+
+  harness.clickRemove('chat-a');
+  await harness.flushMicrotasks();
+  harness.navigatePageWorld('/c/chat-b');
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+
+  assert.deepEqual(harness.getStoredPins().map((pin) => pin.id), ['chat-b']);
+});
+
+test('add action keeps its clicked conversation ID when the route changes during storage read', async () => {
+  const harness = await loadRenderedContent({
+    holdStorageGetCalls: [2],
+    pathname: '/c/chat-a',
+  });
+  await harness.flushRender();
+
+  harness.clickAdd();
+  await harness.flushMicrotasks();
+  harness.navigatePageWorld('/c/chat-b');
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+
+  assert.deepEqual(harness.getStoredPins().map((pin) => pin.id), ['chat-a']);
+});
+
+test('add action reads the URL at click time when navigation is recognized before rerender', async () => {
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a' });
+  await harness.flushRender();
+
+  harness.navigatePageWorld('/c/chat-b');
+  harness.clickAdd();
+  await harness.flushMicrotasks();
+
+  assert.deepEqual(harness.getStoredPins().map((pin) => pin.id), ['chat-b']);
+});
+
+test('ChatRivet root mutations do not schedule self-reentry', async () => {
+  const harness = await loadRenderedContent({ pathname: '/c/chat-a' });
+  await harness.flushRender();
+  assert.equal(harness.getTimerCount(), 0);
+
+  harness.emitRootMutation();
+
+  assert.equal(harness.getTimerCount(), 0);
+});
+
+test('color and reorder paths preserve pin metadata while changing only their target property', async () => {
+  const original = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1, color: 'blue' },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+    { id: 'chat-c', title: 'Gamma', pinnedAt: 3, color: 'green' },
+  ];
+  const harness = await loadContent({ pins: original });
+
+  await harness.api.setPinColor('chat-b', 'purple');
+  const reordered = harness.api.movePinBefore(harness.getStoredPins(), 'chat-c', 'chat-a');
+
+  assert.deepEqual(Array.from(reordered, (pin) => ({ ...pin })), [
+    { id: 'chat-c', title: 'Gamma', pinnedAt: 3, color: 'green' },
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1, color: 'blue' },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2, color: 'purple' },
+  ]);
+});
+
+test('adding an already pinned current chat does not write unchanged storage', async () => {
+  const harness = await loadContent({
+    pathname: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), false);
+  assert.equal(harness.getSetCalls(), 0);
 });

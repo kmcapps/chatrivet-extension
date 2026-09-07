@@ -9,7 +9,14 @@
   const COLOR_SET = new Set(COLOR_OPTIONS);
   let renderTimer;
   let renderGeneration = 0;
+  let domGeneration = 0;
   let lastUrl = location.href;
+  let renderScheduled = false;
+  let renderRunning = false;
+  let renderRequested = false;
+  let renderedRoot = null;
+  let renderedSignature = null;
+  let urlCheckTimers = [];
   let activeColorPickerId = null;
   let dragState = null;
   let pinUpdateQueue = Promise.resolve();
@@ -75,10 +82,22 @@
     await chrome.storage.local.set({ [STORAGE_KEY]: normalizeState(state) });
   }
 
-  function updatePins(updater) {
+  function pinsEqual(left, right) {
+    return left.length === right.length && left.every((pin, index) => {
+      const other = right[index];
+      return pin.id === other.id && pin.title === other.title && pin.pinnedAt === other.pinnedAt && pin.color === other.color;
+    });
+  }
+
+  function updatePins(updater, canCommit = () => true) {
     const update = pinUpdateQueue.then(async () => {
       const state = await getState();
-      await saveState({ version: STATE_VERSION, pins: updater(state.pins.slice()) });
+      if (!canCommit()) return false;
+      const pins = normalizeState({ pins: updater(state.pins.slice()) }).pins;
+      if (pinsEqual(pins, state.pins)) return false;
+      if (!canCommit()) return false;
+      await saveState({ version: STATE_VERSION, pins });
+      return true;
     });
     pinUpdateQueue = update.catch(() => {});
     return update;
@@ -188,18 +207,26 @@
     return changed ? synced : pins;
   }
 
-  async function syncOfficialTitles(pins, recentSection = null) {
-    if (getSyncedPins(pins, recentSection) === pins) return pins;
+  async function syncOfficialTitles(pins, recentSection = null, canCommit = () => true) {
+    const initial = getSyncedPins(pins, recentSection);
+    if (initial === pins || !canCommit()) return pins;
+    const titleUpdates = new Map(initial.map((pin, index) => [pin.id, pin.title !== pins[index].title ? pin.title : null]).filter(([, title]) => title));
     let synced = pins;
     await updatePins((latest) => {
-      synced = getSyncedPins(latest, recentSection);
+      let changed = false;
+      synced = latest.map((pin) => {
+        const title = titleUpdates.get(pin.id);
+        if (!title || title === pin.title) return pin;
+        changed = true;
+        return { ...pin, title };
+      });
+      if (!changed) synced = latest;
       return synced;
-    });
+    }, canCommit);
     return synced;
   }
 
-  async function addCurrentPin() {
-    const id = getChatId();
+  async function addCurrentPin(id = getChatId()) {
     if (!id) return false;
     let added = false;
     const title = getSidebarTitle(id);
@@ -391,78 +418,123 @@
     return picker;
   }
 
-  async function render() {
-    const generation = ++renderGeneration;
+  function getRenderSignature(currentChatId, pins) {
+    return JSON.stringify({
+      activeColorPickerId,
+      currentChatId,
+      pins: pins.map(({ color = null, id, title }) => ({ color, id, title })),
+    });
+  }
+
+  function isRenderCurrent(context) {
+    return !dragState && context.generation === renderGeneration && context.url === location.href;
+  }
+
+  function isMountCurrent(target) {
+    if (!target?.parent?.isConnected) return false;
+    if (target.before && target.before.parentElement !== target.parent) return false;
+    const latest = getMountTarget();
+    return Boolean(latest && latest.parent === target.parent && latest.before === target.before && latest.recentSection === target.recentSection);
+  }
+
+  function abortStaleRender(context) {
+    if (isRenderCurrent(context)) return false;
+    if (dragState) renderPendingDuringDrag = true;
+    return true;
+  }
+
+  async function render(context) {
     if (dragState) {
       renderPendingDuringDrag = true;
       return;
     }
+    let { pins } = await getState();
+    if (abortStaleRender(context)) return;
+
     const target = getMountTarget();
-    const existing = document.getElementById(ROOT_ID);
+    const roots = [...document.querySelectorAll(`#${ROOT_ID}`)];
+    const existing = roots.shift() || null;
+    for (const duplicate of roots) duplicate.remove();
     if (!target) {
       existing?.remove();
+      renderedRoot = null;
+      renderedSignature = null;
       return;
     }
+    if (abortStaleRender(context) || !isMountCurrent(target)) return;
+
     const root = existing || document.createElement('section');
     root.id = ROOT_ID;
     root.className = 'chatdock-root';
     root.setAttribute('aria-label', 'ChatRivet のピン留めチャット');
     if (root.parentElement !== target.parent || root.nextElementSibling !== target.before) target.parent.insertBefore(root, target.before);
 
-    const currentChatId = getChatId();
-    let { pins } = await getState();
-    if (generation !== renderGeneration || dragState) {
-      if (dragState) renderPendingDuringDrag = true;
-      return;
-    }
-    pins = await syncOfficialTitles(pins, target.recentSection);
-    if (generation !== renderGeneration || dragState) {
-      if (dragState) renderPendingDuringDrag = true;
-      return;
-    }
-    root.replaceChildren();
-    const header = document.createElement('div');
-    header.className = 'chatdock-header';
-    const heading = document.createElement('span');
-    heading.className = 'chatdock-heading';
-    heading.textContent = 'ChatRivet';
-    header.appendChild(heading);
-    if (currentChatId && !pins.some((pin) => pin.id === currentChatId)) {
-      header.appendChild(createButton('＋', 'chatdock-add', addCurrentPin, '現在のチャットをピン留め'));
-    }
-    root.appendChild(header);
+    const signature = getRenderSignature(context.currentChatId, pins);
+    if (renderedSignature !== signature || renderedRoot !== root) {
+      root.replaceChildren();
+      const header = document.createElement('div');
+      header.className = 'chatdock-header';
+      const heading = document.createElement('span');
+      heading.className = 'chatdock-heading';
+      heading.textContent = 'ChatRivet';
+      header.appendChild(heading);
+      if (context.currentChatId && !pins.some((pin) => pin.id === context.currentChatId)) {
+        header.appendChild(createButton('＋', 'chatdock-add', () => addCurrentPin(), '現在のチャットをピン留め'));
+      }
+      root.appendChild(header);
 
-    const list = document.createElement('div');
-    list.className = 'chatdock-list';
-    for (const pin of pins) {
-      const row = document.createElement('div');
-      row.className = `chatdock-row${pin.id === currentChatId ? ' chatdock-current' : ''}`;
-      row.dataset.chatdockPinId = pin.id;
-      row.appendChild(createDragHandle(pin, list));
-      row.appendChild(createColorButton(pin));
-      const link = document.createElement('a');
-      link.className = 'chatdock-link';
-      link.href = getChatUrl(pin.id);
-      link.textContent = pin.title;
-      link.title = pin.title;
-      row.appendChild(link);
-      row.appendChild(createButton('×', 'chatdock-remove', () => removePin(pin.id), 'ピン留めを解除'));
-      if (activeColorPickerId === pin.id) row.appendChild(createColorPicker(pin));
-      list.appendChild(row);
+      const list = document.createElement('div');
+      list.className = 'chatdock-list';
+      for (const pin of pins) {
+        const row = document.createElement('div');
+        row.className = `chatdock-row${pin.id === context.currentChatId ? ' chatdock-current' : ''}`;
+        row.dataset.chatdockPinId = pin.id;
+        row.appendChild(createDragHandle(pin, list));
+        row.appendChild(createColorButton(pin));
+        const link = document.createElement('a');
+        link.className = 'chatdock-link';
+        link.href = getChatUrl(pin.id);
+        link.textContent = pin.title;
+        link.title = pin.title;
+        row.appendChild(link);
+        row.appendChild(createButton('×', 'chatdock-remove', () => removePin(pin.id), 'ピン留めを解除'));
+        if (activeColorPickerId === pin.id) row.appendChild(createColorPicker(pin));
+        list.appendChild(row);
+      }
+      root.appendChild(list);
+      renderedRoot = root;
+      renderedSignature = signature;
     }
-    root.appendChild(list);
+
+    const titleDomGeneration = domGeneration;
+    const canSyncTitle = () => isRenderCurrent(context) && titleDomGeneration === domGeneration && isMountCurrent(target);
+    if (!canSyncTitle()) return;
+    await syncOfficialTitles(pins, target.recentSection, canSyncTitle);
   }
 
-  function scheduleRender() {
+  function queueRender() {
+    if (renderScheduled || renderRunning || dragState) return;
+    renderScheduled = true;
+    renderTimer = window.setTimeout(() => {
+      renderScheduled = false;
+      renderRunning = true;
+      renderRequested = false;
+      const context = { currentChatId: getChatId(), generation: renderGeneration, url: location.href };
+      render(context).catch(handleAsyncError).finally(() => {
+        renderRunning = false;
+        if (renderRequested) queueRender();
+      });
+    }, 0);
+  }
+
+  function scheduleRender(invalidate = true) {
+    if (invalidate) renderGeneration += 1;
+    renderRequested = true;
     if (dragState) {
       renderPendingDuringDrag = true;
       return;
     }
-    window.clearTimeout(renderTimer);
-    renderTimer = window.setTimeout(() => {
-      lastUrl = location.href;
-      render().catch(handleAsyncError);
-    }, 120);
+    queueRender();
   }
 
   function closeColorPicker() {
@@ -472,7 +544,28 @@
   }
 
   function observeNavigation() {
-    const notify = () => { if (location.href !== lastUrl) scheduleRender(); };
+    const clearUrlChecks = () => {
+      for (const timer of urlCheckTimers) window.clearTimeout(timer);
+      urlCheckTimers = [];
+    };
+    const notify = () => {
+      if (location.href === lastUrl) return false;
+      lastUrl = location.href;
+      clearUrlChecks();
+      scheduleRender();
+      return true;
+    };
+    const scheduleUrlChecks = () => {
+      notify();
+      clearUrlChecks();
+      for (const delay of [100, 500, 1500]) {
+        const timer = window.setTimeout(() => {
+          urlCheckTimers = urlCheckTimers.filter((candidate) => candidate !== timer);
+          notify();
+        }, delay);
+        urlCheckTimers.push(timer);
+      }
+    };
     for (const method of ['pushState', 'replaceState']) {
       const original = history[method];
       history[method] = function (...args) {
@@ -482,6 +575,11 @@
       };
     }
     window.addEventListener('popstate', notify);
+    window.addEventListener('hashchange', notify);
+    window.addEventListener('pageshow', notify);
+    window.addEventListener('focus', notify);
+    document.addEventListener('click', scheduleUrlChecks, true);
+    return { notify, scheduleUrlChecks };
   }
 
   function shouldRenderForMutations(mutations) {
@@ -495,8 +593,12 @@
     });
   }
 
+  const navigationObserver = observeNavigation();
   new MutationObserver((mutations) => {
-    if (shouldRenderForMutations(mutations)) scheduleRender();
+    if (navigationObserver.notify() || !shouldRenderForMutations(mutations)) return;
+    domGeneration += 1;
+    navigationObserver.scheduleUrlChecks();
+    scheduleRender(false);
   }).observe(document.documentElement, { attributeFilter: ['data-active', 'aria-current'], attributes: true, characterData: true, childList: true, subtree: true });
   document.addEventListener('pointerdown', (event) => {
     if (!activeColorPickerId || !(event.target instanceof Element)) return;
@@ -509,6 +611,5 @@
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local' && (changes[STORAGE_KEY] || changes.pinnedChats)) scheduleRender();
   });
-  observeNavigation();
   scheduleRender();
 })();
