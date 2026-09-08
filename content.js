@@ -21,6 +21,7 @@
   let dragState = null;
   let pinUpdateQueue = Promise.resolve();
   let renderPendingDuringDrag = false;
+  let delegatedNavigation = null;
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -80,6 +81,47 @@
 
   async function saveState(state) {
     await chrome.storage.local.set({ [STORAGE_KEY]: normalizeState(state) });
+  }
+
+  function isPlainPrimaryClick(event) {
+    return event.button === 0 && event.detail !== 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+  }
+
+  function isSafeOfficialNavigationLink(candidate, id) {
+    if (!candidate?.isConnected || candidate.closest(`#${ROOT_ID}`)) return false;
+    try {
+      const url = new URL(candidate.getAttribute('href') || '', location.origin);
+      return url.origin === location.origin && getChatId(url.pathname) === id;
+    } catch {
+      return false;
+    }
+  }
+
+  function getUniqueOfficialNavigationLink(id) {
+    const recentSection = getMountTarget()?.recentSection;
+    if (!recentSection) return null;
+    const candidates = [...recentSection.querySelectorAll('a[href]')].filter((candidate) => isSafeOfficialNavigationLink(candidate, id));
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
+  function delegatePinNavigation(event, id) {
+    if (!isPlainPrimaryClick(event)) return false;
+    const eventTime = Number.isFinite(event.timeStamp) ? event.timeStamp : Date.now();
+    const candidate = getUniqueOfficialNavigationLink(id);
+    if (!candidate || !isSafeOfficialNavigationLink(candidate, id)) return false;
+    if (
+      delegatedNavigation?.id === id &&
+      delegatedNavigation.url === location.href &&
+      eventTime >= delegatedNavigation.time &&
+      eventTime - delegatedNavigation.time < 750
+    ) {
+      event.preventDefault();
+      return true;
+    }
+    event.preventDefault();
+    delegatedNavigation = { id, time: eventTime, url: location.href };
+    candidate.click();
+    return true;
   }
 
   function pinsEqual(left, right) {
@@ -496,6 +538,7 @@
         link.href = getChatUrl(pin.id);
         link.textContent = pin.title;
         link.title = pin.title;
+        link.addEventListener('click', (event) => delegatePinNavigation(event, pin.id));
         row.appendChild(link);
         row.appendChild(createButton('×', 'chatdock-remove', () => removePin(pin.id), 'ピン留めを解除'));
         if (activeColorPickerId === pin.id) row.appendChild(createColorPicker(pin));
@@ -551,6 +594,7 @@
     const notify = () => {
       if (location.href === lastUrl) return false;
       lastUrl = location.href;
+      delegatedNavigation = null;
       clearUrlChecks();
       scheduleRender();
       return true;

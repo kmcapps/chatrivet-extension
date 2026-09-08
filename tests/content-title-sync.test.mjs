@@ -102,6 +102,7 @@ class FakeElement {
     this.type = '';
     this.href = '';
     this.eventListeners = new Map();
+    this.clickCount = 0;
     this._classes = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this._classes.add(name)),
@@ -213,9 +214,23 @@ class FakeElement {
   releasePointerCapture() {}
   focus() {}
 
-  click() {
-    const event = { preventDefault() {}, stopPropagation() {}, target: this };
+  click(options = {}) {
+    this.clickCount += 1;
+    const event = {
+      altKey: false,
+      button: 0,
+      ctrlKey: false,
+      defaultPrevented: false,
+      detail: 0,
+      metaKey: false,
+      shiftKey: false,
+      stopPropagation() {},
+      preventDefault() { this.defaultPrevented = true; },
+      target: this,
+      ...options,
+    };
     for (const listener of this.eventListeners.get('click') || []) listener(event);
+    return event;
   }
 }
 
@@ -232,7 +247,7 @@ function matchesSelector(element, selector) {
   });
 }
 
-function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent = true, navAriaLabel = 'Chat history' } = {}) {
+function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = null, includeRecent = true, navAriaLabel = 'Chat history' } = {}) {
   const documentElement = new FakeElement('html');
   const nav = new FakeElement('nav');
   if (navAriaLabel) nav.setAttribute('aria-label', navAriaLabel);
@@ -245,12 +260,17 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
     recentButton.appendChild(recentHeading);
     historySection.appendChild(recentButton);
   }
-  const historyLink = new FakeElement('a');
-  historyLink.setAttribute('href', historyHref);
-  historyLink.textContent = 'History chat';
+  const officialHrefs = historyHrefs || [historyHref];
+  const historyLinks = officialHrefs.map((href, index) => {
+    const link = new FakeElement('a');
+    link.setAttribute('href', href);
+    link.textContent = `History chat ${index + 1}`;
+    return link;
+  });
+  const historyLink = historyLinks[0];
   const historyRow = new FakeElement('li');
   historyRow.setAttribute('role', 'listitem');
-  historyRow.appendChild(historyLink);
+  for (const link of historyLinks) historyRow.appendChild(link);
   const historyMenu = new FakeElement('button');
   historyMenu.setAttribute('aria-label', 'History chat options');
   historyRow.appendChild(historyMenu);
@@ -273,6 +293,7 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
       },
     },
     historyMenu,
+    historyLinks,
     historyRow,
     nav,
     recentSection: includeRecent ? historySection : null,
@@ -281,6 +302,7 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', includeRecent =
 
 async function loadRenderedContent({
   historyHref = '/c/history-chat',
+  historyHrefs = null,
   holdStorageGetCalls = [],
   includeRecent = true,
   navAriaLabel = 'Chat history',
@@ -299,7 +321,7 @@ async function loadRenderedContent({
   let mutationCallback = null;
   const windowListeners = new Map();
   const storageListeners = [];
-  const renderedDocument = makeRenderedDocument({ historyHref, includeRecent, navAriaLabel });
+  const renderedDocument = makeRenderedDocument({ historyHref, historyHrefs, includeRecent, navAriaLabel });
   const location = {
     href: `https://chatgpt.com${pathname}`,
     origin: 'https://chatgpt.com',
@@ -438,8 +460,13 @@ async function loadRenderedContent({
     flushMicrotasks,
     getAddButton: () => renderedDocument.document.querySelector('.chatdock-add'),
     getHistoryMenu: () => renderedDocument.historyMenu,
+    getHistoryLinks: () => renderedDocument.historyLinks,
     getHistoryRow: () => renderedDocument.historyRow,
     getRoot: () => renderedDocument.document.getElementById('chatdock-root'),
+    getPinLink(id) {
+      const row = renderedDocument.document.querySelectorAll('.chatdock-row').find((candidate) => candidate.dataset.chatdockPinId === id);
+      return row?.querySelector('.chatdock-link') || null;
+    },
     getSetCalls: () => storageSetCalls,
     getStoredPins: () => structuredClone(storageState.chatdockState.pins),
     getTimerCount: () => timers.size,
@@ -1254,4 +1281,216 @@ test('adding an already pinned current chat does not write unchanged storage', a
 
   assert.equal(await harness.api.addCurrentPin(), false);
   assert.equal(harness.getSetCalls(), 0);
+});
+
+test('plain pin click delegates once to the unique matching official Recent link', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 1);
+});
+
+test('pin click keeps native href fallback when official Recent has no match', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/other-chat',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 0);
+});
+
+test('pin click rejects a cross-origin lookalike and keeps native href fallback', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: 'https://example.com/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 0);
+});
+
+test('pin click keeps native href fallback when official Recent match is ambiguous', async () => {
+  const harness = await loadRenderedContent({
+    historyHrefs: ['/c/chat-a', '/c/chat-a'],
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(harness.getHistoryLinks().map((link) => link.clickCount), [0, 0]);
+});
+
+test('project conversation delegates only to its exact official conversation anchor', async () => {
+  const harness = await loadRenderedContent({
+    historyHrefs: ['/g/project-a/c/chat-a', '/g/project-a/c/chat-b'],
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(harness.getHistoryLinks().map((link) => link.clickCount), [1, 0]);
+});
+
+test('project conversation keeps native fallback when exact official anchors are ambiguous', async () => {
+  const harness = await loadRenderedContent({
+    historyHrefs: ['/g/project-a/c/chat-a', '/g/project-b/c/chat-a'],
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(harness.getHistoryLinks().map((link) => link.clickCount), [0, 0]);
+});
+
+for (const [name, options] of [
+  ['Ctrl click', { ctrlKey: true }],
+  ['Cmd click', { metaKey: true }],
+  ['middle click', { button: 1 }],
+  ['Shift click', { shiftKey: true }],
+]) {
+  test(`${name} keeps native multi-tab navigation behavior`, async () => {
+    const harness = await loadRenderedContent({
+      historyHref: '/c/chat-a',
+      pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+    });
+    await harness.flushRender();
+
+    const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100, ...options });
+
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(harness.getHistoryLinks()[0].clickCount, 0);
+  });
+}
+
+test('keyboard-generated pin activation keeps native anchor accessibility behavior', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+
+  const event = harness.getPinLink('chat-a').click({ detail: 0, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 0);
+});
+
+test('disconnected official candidate safely falls back without double navigation', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+  const official = harness.getHistoryLinks()[0];
+  let connectedReads = 0;
+  Object.defineProperty(official, 'isConnected', {
+    configurable: true,
+    get() {
+      connectedReads += 1;
+      return connectedReads === 1;
+    },
+  });
+
+  const event = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(official.clickCount, 0);
+});
+
+test('rapid repeated pin clicks delegate only once and reconciliation still converges', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+  ];
+  const harness = await loadRenderedContent({ historyHref: '/c/chat-a', pathname: '/c/chat-b', pins });
+  await harness.flushRender();
+  const pinLink = harness.getPinLink('chat-a');
+
+  const first = pinLink.click({ detail: 1, timeStamp: 100 });
+  const second = pinLink.click({ detail: 1, timeStamp: 150 });
+  harness.emitNavMutation();
+  await harness.flushRender();
+
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(second.defaultPrevented, true);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 1);
+  assert.equal(harness.getUiSnapshot().rootCount, 1);
+  assert.equal(harness.getTimerCount(), 0);
+});
+
+test('rapid repeat uses native fallback when the delegated official candidate disappears', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+  const pinLink = harness.getPinLink('chat-a');
+  const official = harness.getHistoryLinks()[0];
+
+  const first = pinLink.click({ detail: 1, timeStamp: 100 });
+  official.remove();
+  const second = pinLink.click({ detail: 1, timeStamp: 150 });
+
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(second.defaultPrevented, false);
+  assert.equal(official.clickCount, 1);
+});
+
+test('route change makes a rapid repeat eligible for fresh official delegation', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    pathname: '/c/chat-b',
+    pins: [{ id: 'chat-a', title: 'Alpha', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+  const pinLink = harness.getPinLink('chat-a');
+
+  const first = pinLink.click({ detail: 1, timeStamp: 100 });
+  harness.setLocationOnly('/c/chat-c');
+  const second = pinLink.click({ detail: 1, timeStamp: 150 });
+
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(second.defaultPrevented, true);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 2);
+});
+
+test('recognized round-trip navigation clears rapid-click suppression', async () => {
+  const pins = [
+    { id: 'chat-a', title: 'Alpha', pinnedAt: 1 },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+  ];
+  const harness = await loadRenderedContent({ historyHref: '/c/chat-a', pathname: '/c/chat-b', pins });
+  await harness.flushRender();
+
+  const first = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 100 });
+  harness.setLocationOnly('/c/chat-a');
+  harness.dispatchWindowEvent('popstate');
+  await harness.flushRender();
+  harness.setLocationOnly('/c/chat-b');
+  harness.dispatchWindowEvent('popstate');
+  await harness.flushRender();
+  const second = harness.getPinLink('chat-a').click({ detail: 1, timeStamp: 150 });
+
+  assert.equal(first.defaultPrevented, true);
+  assert.equal(second.defaultPrevented, true);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 2);
 });
