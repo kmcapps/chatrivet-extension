@@ -297,10 +297,99 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = 
     historyRow,
     nav,
     recentSection: includeRecent ? historySection : null,
+    setHistoryTitle(value, index = 0) {
+      historyLinks[index].textContent = value;
+    },
+  };
+}
+
+function makeSharedStorageBackend(pins) {
+  let storageState = { chatdockState: { version: 1, pins: structuredClone(pins) } };
+  const listeners = new Map();
+  const lockTails = new Map();
+  const setCounts = new Map();
+  let heldSet = null;
+  let heldSetStarted = null;
+  let heldSetRelease = null;
+
+  const notify = (oldState) => {
+    const changes = {
+      chatdockState: {
+        oldValue: structuredClone(oldState.chatdockState),
+        newValue: structuredClone(storageState.chatdockState),
+      },
+    };
+    for (const contextListeners of listeners.values()) {
+      for (const listener of contextListeners) listener(changes, 'local');
+    }
+  };
+
+  return {
+    bind(contextId) {
+      const contextListeners = [];
+      listeners.set(contextId, contextListeners);
+      return {
+        local: {
+          async get() {
+            return structuredClone(storageState);
+          },
+          async set(value) {
+            if (heldSet?.contextId === contextId) {
+              const current = heldSet;
+              heldSet = null;
+              current.started();
+              await current.wait;
+            }
+            const oldState = structuredClone(storageState);
+            setCounts.set(contextId, (setCounts.get(contextId) || 0) + 1);
+            storageState = { ...storageState, ...structuredClone(value) };
+            notify(oldState);
+          },
+        },
+        locks: {
+          request(name, callback) {
+            const previous = lockTails.get(name) || Promise.resolve();
+            const operation = previous.then(callback);
+            lockTails.set(name, operation.catch(() => {}));
+            return operation;
+          },
+        },
+        onChanged: {
+          addListener(listener) {
+            contextListeners.push(listener);
+          },
+        },
+      };
+    },
+    close(contextId) {
+      listeners.delete(contextId);
+    },
+    getPins() {
+      return structuredClone(storageState.chatdockState.pins);
+    },
+    getSetCount(contextId) {
+      return setCounts.get(contextId) || 0;
+    },
+    holdNextSet(contextId) {
+      let release;
+      let started;
+      heldSetStarted = new Promise((resolve) => { started = resolve; });
+      const wait = new Promise((resolve) => { release = resolve; });
+      heldSet = { contextId, release, started, wait };
+      heldSetRelease = release;
+    },
+    releaseHeldSet() {
+      heldSetRelease?.();
+      heldSetRelease = null;
+    },
+    waitForHeldSet() {
+      return heldSetStarted;
+    },
   };
 }
 
 async function loadRenderedContent({
+  contextId = 'default',
   historyHref = '/c/history-chat',
   historyHrefs = null,
   holdStorageGetCalls = [],
@@ -308,6 +397,7 @@ async function loadRenderedContent({
   navAriaLabel = 'Chat history',
   pathname = '/c/current',
   pins = [],
+  storageBackend = null,
 } = {}) {
   const source = await readFile(contentPath, 'utf8');
   let storageState = { chatdockState: { version: 1, pins } };
@@ -322,6 +412,7 @@ async function loadRenderedContent({
   const windowListeners = new Map();
   const storageListeners = [];
   const renderedDocument = makeRenderedDocument({ historyHref, historyHrefs, includeRecent, navAriaLabel });
+  const sharedStorage = storageBackend?.bind(contextId);
   const location = {
     href: `https://chatgpt.com${pathname}`,
     origin: 'https://chatgpt.com',
@@ -339,7 +430,7 @@ async function loadRenderedContent({
   const context = {
     chrome: {
       storage: {
-        local: {
+        local: sharedStorage?.local || {
           async get() {
             storageGetCalls += 1;
             const snapshot = structuredClone(storageState);
@@ -356,7 +447,7 @@ async function loadRenderedContent({
             }
           },
         },
-        onChanged: { addListener(listener) { storageListeners.push(listener); } },
+        onChanged: sharedStorage?.onChanged || { addListener(listener) { storageListeners.push(listener); } },
       },
     },
     console,
@@ -369,6 +460,7 @@ async function loadRenderedContent({
       observe() {}
     },
     Node: { DOCUMENT_POSITION_PRECEDING: 2, ELEMENT_NODE: 1 },
+    navigator: { locks: sharedStorage?.locks },
     structuredClone,
     URL,
     window: {
@@ -483,6 +575,7 @@ async function loadRenderedContent({
       await flushMicrotasks();
     },
     setLocationOnly: setLocation,
+    setHistoryTitle: renderedDocument.setHistoryTitle,
     setStoredPins(pinsValue) {
       storageState = { chatdockState: { version: 1, pins: structuredClone(pinsValue) } };
       for (const listener of storageListeners) {
@@ -492,7 +585,16 @@ async function loadRenderedContent({
   };
 }
 
-async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/current', pauseGetBatch = 0, pins = [], recentRows = [] } = {}) {
+async function loadContent({
+  anchors = [],
+  contextId = 'default',
+  offNavAnchors = [],
+  pathname = '/c/current',
+  pauseGetBatch = 0,
+  pins = [],
+  recentRows = [],
+  storageBackend = null,
+} = {}) {
   const source = await readFile(contentPath, 'utf8');
   const instrumented = source.replace(
     /  scheduleRender\(\);\r?\n\}\)\(\);\s*$/,
@@ -504,6 +606,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
   let observerOptions = null;
   let storageState = { chatdockState: { version: 1, pins } };
   let pausedGets = 0;
+  const sharedStorage = storageBackend?.bind(contextId);
   const recentAnchors = recentRows.map((row) => row.anchor);
   const recentSection = {
     querySelectorAll(selector) {
@@ -525,7 +628,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
   const context = {
     chrome: {
       storage: {
-        local: {
+        local: sharedStorage?.local || {
           async get() {
             const snapshot = structuredClone(storageState);
             if (pausedGets < pauseGetBatch) {
@@ -539,7 +642,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
             storageState = { ...storageState, ...structuredClone(value) };
           },
         },
-        onChanged: { addListener() {} },
+        onChanged: sharedStorage?.onChanged || { addListener() {} },
       },
     },
     console,
@@ -567,6 +670,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
       }
     },
     Node: { DOCUMENT_POSITION_PRECEDING: 2, ELEMENT_NODE: 1 },
+    navigator: { locks: sharedStorage?.locks },
     structuredClone,
     URL,
     window: {
@@ -581,7 +685,7 @@ async function loadContent({ anchors = [], offNavAnchors = [], pathname = '/c/cu
   return {
     api: context.__chatdockTest,
     getSetCalls: () => setCalls,
-    getStoredPins: () => structuredClone(storageState.chatdockState.pins),
+    getStoredPins: () => storageBackend ? storageBackend.getPins() : structuredClone(storageState.chatdockState.pins),
     getObserverOptions: () => structuredClone(observerOptions),
     recentSection,
   };
@@ -1493,4 +1597,201 @@ test('recognized round-trip navigation clears rapid-click suppression', async ()
   assert.equal(first.defaultPrevented, true);
   assert.equal(second.defaultPrevented, true);
   assert.equal(harness.getHistoryLinks()[0].clickCount, 2);
+});
+
+test('a storage notification from a renamed chat does not make a stale context restore the old title', async () => {
+  const original = [{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'blue' }];
+  const storage = makeSharedStorageBackend(original);
+  const fresh = await loadRenderedContent({
+    contextId: 'fresh',
+    historyHref: '/c/chat-a',
+    pins: original,
+    storageBackend: storage,
+  });
+  const stale = await loadRenderedContent({
+    contextId: 'stale',
+    historyHref: '/c/chat-a',
+    pins: original,
+    storageBackend: storage,
+  });
+  fresh.setHistoryTitle('Old title');
+  stale.setHistoryTitle('Old title');
+  await fresh.flushRender();
+  await stale.flushRender();
+
+  fresh.setHistoryTitle('New title');
+  fresh.emitNavMutation();
+  await fresh.flushRender();
+  assert.equal(storage.getPins()[0].title, 'New title');
+
+  await stale.flushRender();
+  stale.emitNavMutation();
+  await stale.flushRender();
+
+  assert.equal(storage.getPins()[0].title, 'New title');
+  assert.equal(storage.getSetCount('fresh'), 1);
+  assert.equal(storage.getSetCount('stale'), 0);
+});
+
+test('a real title mutation remains pending when another context invalidates its first storage attempt', async () => {
+  const harness = await loadRenderedContent({
+    historyHref: '/c/chat-a',
+    holdStorageGetCalls: [3],
+    pins: [{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'blue' }],
+  });
+  harness.setHistoryTitle('Old title');
+  await harness.flushRender();
+
+  harness.setHistoryTitle('New title');
+  harness.emitNavMutation();
+  await harness.runNextTimer();
+  harness.setStoredPins([{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'red' }]);
+  harness.releaseStorageGet();
+  await harness.flushMicrotasks();
+  await harness.flushRender();
+
+  assert.deepEqual(harness.getStoredPins(), [
+    { id: 'chat-a', title: 'New title', pinnedAt: 1, color: 'red' },
+  ]);
+});
+
+test('a stale title write from another context cannot resurrect a pin removed with the close button', async () => {
+  const original = [{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'green' }];
+  const storage = makeSharedStorageBackend(original);
+  const remover = await loadContent({
+    contextId: 'remover',
+    pins: original,
+    storageBackend: storage,
+  });
+  const staleWriter = await loadContent({
+    anchors: [makeAnchor('/c/chat-a', 'New title')],
+    contextId: 'stale-writer',
+    pins: original,
+    storageBackend: storage,
+  });
+  storage.holdNextSet('stale-writer');
+
+  const staleWrite = staleWriter.api.syncOfficialTitles(original);
+  await storage.waitForHeldSet();
+  const remove = remover.api.removePin('chat-a');
+  await new Promise((resolve) => setImmediate(resolve));
+  storage.releaseHeldSet();
+  await Promise.all([staleWrite, remove]);
+
+  assert.deepEqual(storage.getPins(), []);
+});
+
+test('a stale title write cannot discard a pin added from another context', async () => {
+  const original = [{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'blue' }];
+  const storage = makeSharedStorageBackend(original);
+  const actor = await loadContent({
+    anchors: [makeAnchor('/c/chat-b', 'Added chat')],
+    contextId: 'actor',
+    pathname: '/c/chat-b',
+    pins: original,
+    storageBackend: storage,
+  });
+  const staleWriter = await loadContent({
+    anchors: [makeAnchor('/c/chat-a', 'New title')],
+    contextId: 'stale-writer',
+    pins: original,
+    storageBackend: storage,
+  });
+  storage.holdNextSet('stale-writer');
+
+  const staleWrite = staleWriter.api.syncOfficialTitles(original);
+  await storage.waitForHeldSet();
+  const add = actor.api.addCurrentPin('chat-b');
+  await new Promise((resolve) => setImmediate(resolve));
+  storage.releaseHeldSet();
+  await Promise.all([staleWrite, add]);
+
+  assert.deepEqual(storage.getPins().map(({ color = null, id, title }) => ({ color, id, title })), [
+    { color: 'blue', id: 'chat-a', title: 'New title' },
+    { color: null, id: 'chat-b', title: 'Added chat' },
+  ]);
+});
+
+test('closing the stale context lets the remaining tab keep the renamed title without a reload', async () => {
+  const original = [{ id: 'chat-a', title: 'Old title', pinnedAt: 1 }];
+  const storage = makeSharedStorageBackend(original);
+  const fresh = await loadRenderedContent({
+    contextId: 'fresh',
+    historyHref: '/c/chat-a',
+    pins: original,
+    storageBackend: storage,
+  });
+  const stale = await loadRenderedContent({
+    contextId: 'stale',
+    historyHref: '/c/chat-a',
+    pins: original,
+    storageBackend: storage,
+  });
+  fresh.setHistoryTitle('Old title');
+  stale.setHistoryTitle('Old title');
+  await fresh.flushRender();
+  await stale.flushRender();
+  storage.close('stale');
+
+  fresh.setHistoryTitle('New title');
+  fresh.emitNavMutation();
+  await fresh.flushRender();
+
+  assert.equal(storage.getPins()[0].title, 'New title');
+  assert.equal(storage.getSetCount('fresh'), 1);
+  assert.equal(storage.getSetCount('stale'), 0);
+});
+
+test('a stale title write cannot roll back a color change from another context', async () => {
+  const original = [{ id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'blue' }];
+  const storage = makeSharedStorageBackend(original);
+  const actor = await loadContent({ contextId: 'actor', pins: original, storageBackend: storage });
+  const staleWriter = await loadContent({
+    anchors: [makeAnchor('/c/chat-a', 'New title')],
+    contextId: 'stale-writer',
+    pins: original,
+    storageBackend: storage,
+  });
+  storage.holdNextSet('stale-writer');
+
+  const staleWrite = staleWriter.api.syncOfficialTitles(original);
+  await storage.waitForHeldSet();
+  const recolor = actor.api.setPinColor('chat-a', 'red');
+  await new Promise((resolve) => setImmediate(resolve));
+  storage.releaseHeldSet();
+  await Promise.all([staleWrite, recolor]);
+
+  assert.deepEqual(storage.getPins().map(({ color, id, title }) => ({ color, id, title })), [
+    { color: 'red', id: 'chat-a', title: 'New title' },
+  ]);
+});
+
+test('a stale title write cannot roll back a reorder from another context', async () => {
+  const original = [
+    { id: 'chat-a', title: 'Old title', pinnedAt: 1, color: 'green' },
+    { id: 'chat-b', title: 'Beta', pinnedAt: 2 },
+    { id: 'chat-c', title: 'Gamma', pinnedAt: 3, color: 'purple' },
+  ];
+  const storage = makeSharedStorageBackend(original);
+  const actor = await loadContent({ contextId: 'actor', pins: original, storageBackend: storage });
+  const staleWriter = await loadContent({
+    anchors: [makeAnchor('/c/chat-a', 'New title')],
+    contextId: 'stale-writer',
+    pins: original,
+    storageBackend: storage,
+  });
+  storage.holdNextSet('stale-writer');
+
+  const staleWrite = staleWriter.api.syncOfficialTitles(original);
+  await storage.waitForHeldSet();
+  const reorder = actor.api.updatePins((pins) => actor.api.movePinBefore(pins, 'chat-c', 'chat-a'));
+  await new Promise((resolve) => setImmediate(resolve));
+  storage.releaseHeldSet();
+  await Promise.all([staleWrite, reorder]);
+
+  assert.deepEqual(storage.getPins().map(({ color = null, id, title }) => ({ color, id, title })), [
+    { color: 'purple', id: 'chat-c', title: 'Gamma' },
+    { color: 'green', id: 'chat-a', title: 'New title' },
+    { color: null, id: 'chat-b', title: 'Beta' },
+  ]);
 });

@@ -7,6 +7,7 @@
   const COLOR_OPTIONS = ['blue', 'teal', 'green', 'yellow', 'orange', 'red', 'purple', 'pink'];
   const COLOR_NAMES = { blue: '青', teal: '青緑', green: '緑', yellow: '黄', orange: '橙', red: '赤', purple: '紫', pink: '桃' };
   const COLOR_SET = new Set(COLOR_OPTIONS);
+  const PIN_UPDATE_LOCK_NAME = `chatrivet:${chrome.runtime?.id || 'extension'}:pin-update`;
   let renderTimer;
   let renderGeneration = 0;
   let domGeneration = 0;
@@ -22,6 +23,9 @@
   let pinUpdateQueue = Promise.resolve();
   let renderPendingDuringDrag = false;
   let delegatedNavigation = null;
+  let titleSyncRequested = false;
+  let observedOfficialTitles = new Map();
+  const pendingOfficialTitles = new Map();
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -132,7 +136,7 @@
   }
 
   function updatePins(updater, canCommit = () => true) {
-    const update = pinUpdateQueue.then(async () => {
+    const runUpdate = async () => {
       const state = await getState();
       if (!canCommit()) return false;
       const pins = normalizeState({ pins: updater(state.pins.slice()) }).pins;
@@ -140,6 +144,10 @@
       if (!canCommit()) return false;
       await saveState({ version: STATE_VERSION, pins });
       return true;
+    };
+    const update = pinUpdateQueue.then(() => {
+      const locks = globalThis.navigator?.locks;
+      return locks?.request ? locks.request(PIN_UPDATE_LOCK_NAME, runUpdate) : runUpdate();
     });
     pinUpdateQueue = update.catch(() => {});
     return update;
@@ -249,8 +257,35 @@
     return changed ? synced : pins;
   }
 
-  async function syncOfficialTitles(pins, recentSection = null, canCommit = () => true) {
-    const initial = getSyncedPins(pins, recentSection);
+  function getPendingOfficialTitlePins(pins, recentSection = null, recordChanges = false) {
+    const nextObservedTitles = new Map();
+    const pinIds = new Set(pins.map((pin) => pin.id));
+    let changed = false;
+    const synced = pins.map((pin) => {
+      const title = getOfficialSidebarTitle(pin.id, recentSection);
+      if (title) nextObservedTitles.set(pin.id, title);
+      if (
+        recordChanges &&
+        title &&
+        (!observedOfficialTitles.has(pin.id) || observedOfficialTitles.get(pin.id) !== title)
+      ) pendingOfficialTitles.set(pin.id, title);
+      const pendingTitle = pendingOfficialTitles.get(pin.id);
+      if (!pendingTitle || pendingTitle === pin.title) {
+        if (pendingTitle === pin.title) pendingOfficialTitles.delete(pin.id);
+        return pin;
+      }
+      changed = true;
+      return { ...pin, title: pendingTitle };
+    });
+    for (const id of pendingOfficialTitles.keys()) {
+      if (!pinIds.has(id)) pendingOfficialTitles.delete(id);
+    }
+    observedOfficialTitles = nextObservedTitles;
+    return changed ? synced : pins;
+  }
+
+  async function syncOfficialTitles(pins, recentSection = null, canCommit = () => true, preparedPins = null) {
+    const initial = preparedPins || getSyncedPins(pins, recentSection);
     if (initial === pins || !canCommit()) return pins;
     const titleUpdates = new Map(initial.map((pin, index) => [pin.id, pin.title !== pins[index].title ? pin.title : null]).filter(([, title]) => title));
     let synced = pins;
@@ -552,7 +587,12 @@
     const titleDomGeneration = domGeneration;
     const canSyncTitle = () => isRenderCurrent(context) && titleDomGeneration === domGeneration && isMountCurrent(target);
     if (!canSyncTitle()) return;
-    await syncOfficialTitles(pins, target.recentSection, canSyncTitle);
+    const observedPins = getPendingOfficialTitlePins(pins, target.recentSection, context.syncTitles);
+    if (observedPins === pins) return;
+    const syncedPins = await syncOfficialTitles(pins, target.recentSection, canSyncTitle, observedPins);
+    for (const pin of syncedPins) {
+      if (pendingOfficialTitles.get(pin.id) === pin.title) pendingOfficialTitles.delete(pin.id);
+    }
   }
 
   function queueRender() {
@@ -562,7 +602,8 @@
       renderScheduled = false;
       renderRunning = true;
       renderRequested = false;
-      const context = { currentChatId: getChatId(), generation: renderGeneration, url: location.href };
+      const context = { currentChatId: getChatId(), generation: renderGeneration, syncTitles: titleSyncRequested, url: location.href };
+      titleSyncRequested = false;
       render(context).catch(handleAsyncError).finally(() => {
         renderRunning = false;
         if (renderRequested) queueRender();
@@ -570,8 +611,9 @@
     }, 0);
   }
 
-  function scheduleRender(invalidate = true) {
+  function scheduleRender(invalidate = true, syncTitles = true) {
     if (invalidate) renderGeneration += 1;
+    if (syncTitles) titleSyncRequested = true;
     renderRequested = true;
     if (dragState) {
       renderPendingDuringDrag = true;
@@ -653,7 +695,7 @@
     if (event.key === 'Escape') closeColorPicker();
   });
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && (changes[STORAGE_KEY] || changes.pinnedChats)) scheduleRender();
+    if (areaName === 'local' && (changes[STORAGE_KEY] || changes.pinnedChats)) scheduleRender(true, false);
   });
   scheduleRender();
 })();
