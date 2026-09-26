@@ -57,6 +57,27 @@ function makeCurrentRecentAnchor(href, title) {
   return anchor;
 }
 
+function makeDataThreadTitleAnchor(href, title) {
+  const anchor = makeAnchor(href, title);
+  const titleElement = {
+    textContent: title,
+    classList: { contains(name) { return name === 'min-w-0' || name === 'flex-1'; } },
+    getAttribute(name) { return name === 'data-thread-title' ? '' : null; },
+  };
+  const marqueeContent = {
+    textContent: title,
+    classList: { contains() { return false; } },
+    getAttribute(name) { return name === 'data-marquee-content' ? '' : null; },
+  };
+  anchor.querySelectorAll = (selector) => selector === '*' ? [titleElement, marqueeContent] : [];
+  anchor.setTitle = (value) => {
+    titleElement.textContent = value;
+    marqueeContent.textContent = value;
+    anchor.textContent = value;
+  };
+  return anchor;
+}
+
 function selectAnchors(anchors, selector) {
   if (selector === 'a[href]') return anchors;
   if (selector === 'a[href^="/c/"]') return anchors.filter((anchor) => (anchor.getAttribute('href') || '').startsWith('/c/'));
@@ -240,6 +261,8 @@ function matchesSelector(element, selector) {
     if (value.startsWith('#')) return element.id === value.slice(1);
     if (value.startsWith('.')) return element.classList.contains(value.slice(1));
     if (value === '[role="listitem"]') return element.getAttribute('role') === 'listitem';
+    const attribute = value.match(/^([a-z]+)?\[([a-z0-9-]+)\]$/i);
+    if (attribute) return (!attribute[1] || element.tagName === attribute[1].toUpperCase()) && element.getAttribute(attribute[2]) !== null;
     const hrefPrefix = value.match(/^a\[href\^="([^"]+)"\]$/);
     if (hrefPrefix) return element.tagName === 'A' && (element.getAttribute('href') || '').startsWith(hrefPrefix[1]);
     if (value === 'a[href]') return element.tagName === 'A' && element.getAttribute('href') !== null;
@@ -247,13 +270,66 @@ function matchesSelector(element, selector) {
   });
 }
 
-function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = null, includeRecent = true, navAriaLabel = 'Chat history' } = {}) {
+function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = null, includeRecent = true, includePinned = true, includeProjects = true, includeExplore = true, modernLayout = false, locale = 'ja', navAriaLabel = 'Chat history' } = {}) {
   const documentElement = new FakeElement('html');
+  const aside = new FakeElement('aside');
+  documentElement.appendChild(aside);
+  if (modernLayout) {
+    const rail = new FakeElement('nav');
+    rail.setAttribute('data-app-navigation-rail', 'true');
+    for (const label of ['ピン留め', '最近の項目']) {
+      const hiddenButton = new FakeElement('button');
+      hiddenButton.setAttribute('aria-label', label);
+      rail.appendChild(hiddenButton);
+    }
+    aside.appendChild(rail);
+  }
   const nav = new FakeElement('nav');
   if (navAriaLabel) nav.setAttribute('aria-label', navAriaLabel);
-  documentElement.appendChild(nav);
-  const historySection = new FakeElement('section');
-  if (includeRecent) {
+  aside.appendChild(nav);
+  let scroll = null;
+  let utilityGroup = null;
+  let sectionsGroup = null;
+  let historySection = new FakeElement('section');
+  if (modernLayout) {
+    const labels = locale === 'en'
+      ? { explore: 'Explore', pinned: 'Pinned', projects: 'Projects', recent: 'Recent items' }
+      : { explore: '探索', pinned: 'ピン留め', projects: 'プロジェクト', recent: '最近の項目' };
+    const newChat = new FakeElement('div');
+    nav.appendChild(newChat);
+    scroll = new FakeElement('div');
+    scroll.setAttribute('data-app-action-sidebar-scroll', 'true');
+    nav.appendChild(scroll);
+    utilityGroup = new FakeElement('div');
+    if (includeExplore) {
+      const explore = new FakeElement('button');
+      explore.textContent = labels.explore;
+      const exploreLabel = new FakeElement('span');
+      exploreLabel.textContent = labels.explore;
+      explore.appendChild(exploreLabel);
+      utilityGroup.appendChild(explore);
+    }
+    scroll.appendChild(utilityGroup);
+    sectionsGroup = new FakeElement('div');
+    scroll.appendChild(sectionsGroup);
+    const addOfficialSection = (label) => {
+      const section = new FakeElement('section');
+      section.setAttribute('data-app-action-sidebar-section', 'true');
+      const toggle = new FakeElement('button');
+      toggle.setAttribute('data-app-action-sidebar-section-toggle', 'true');
+      toggle.textContent = label;
+      const labelSpan = new FakeElement('span');
+      labelSpan.textContent = label;
+      toggle.appendChild(labelSpan);
+      section.appendChild(toggle);
+      sectionsGroup.appendChild(section);
+      return section;
+    };
+    if (includePinned) addOfficialSection(labels.pinned);
+    if (includeProjects) addOfficialSection(labels.projects);
+    if (includeRecent) historySection = addOfficialSection(labels.recent);
+  }
+  if (includeRecent && !modernLayout) {
     const recentButton = new FakeElement('button');
     const recentHeading = new FakeElement('h2');
     recentHeading.textContent = 'Recent';
@@ -265,6 +341,14 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = 
     const link = new FakeElement('a');
     link.setAttribute('href', href);
     link.textContent = `History chat ${index + 1}`;
+    if (modernLayout) {
+      const title = new FakeElement('span');
+      title.setAttribute('data-thread-title', '');
+      title.setAttribute('data-marquee-text', '');
+      title.classList.add('min-w-0', 'flex-1');
+      title.textContent = link.textContent;
+      link.appendChild(title);
+    }
     return link;
   });
   const historyLink = historyLinks[0];
@@ -275,7 +359,7 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = 
   historyMenu.setAttribute('aria-label', 'History chat options');
   historyRow.appendChild(historyMenu);
   historySection.appendChild(historyRow);
-  nav.appendChild(historySection);
+  if (!modernLayout) nav.appendChild(historySection);
   const documentListeners = new Map();
   return {
     dispatchDocumentEvent(type, target = documentElement) {
@@ -296,9 +380,23 @@ function makeRenderedDocument({ historyHref = '/c/history-chat', historyHrefs = 
     historyLinks,
     historyRow,
     nav,
+    scroll,
+    utilityGroup,
+    sectionsGroup,
+    replaceModernScroll() {
+      const replacement = new FakeElement('div');
+      replacement.setAttribute('data-app-action-sidebar-scroll', 'true');
+      replacement.appendChild(utilityGroup);
+      replacement.appendChild(sectionsGroup);
+      scroll.remove();
+      nav.appendChild(replacement);
+      this.scroll = replacement;
+    },
     recentSection: includeRecent ? historySection : null,
     setHistoryTitle(value, index = 0) {
       historyLinks[index].textContent = value;
+      const title = historyLinks[index].querySelector('[data-thread-title]');
+      if (title) title.textContent = value;
     },
   };
 }
@@ -394,6 +492,11 @@ async function loadRenderedContent({
   historyHrefs = null,
   holdStorageGetCalls = [],
   includeRecent = true,
+  includePinned = true,
+  includeProjects = true,
+  includeExplore = true,
+  modernLayout = false,
+  locale = 'ja',
   navAriaLabel = 'Chat history',
   pathname = '/c/current',
   pins = [],
@@ -411,7 +514,7 @@ async function loadRenderedContent({
   let mutationCallback = null;
   const windowListeners = new Map();
   const storageListeners = [];
-  const renderedDocument = makeRenderedDocument({ historyHref, historyHrefs, includeRecent, navAriaLabel });
+  const renderedDocument = makeRenderedDocument({ historyHref, historyHrefs, includeRecent, includePinned, includeProjects, includeExplore, modernLayout, locale, navAriaLabel });
   const sharedStorage = storageBackend?.bind(contextId);
   const location = {
     href: `https://chatgpt.com${pathname}`,
@@ -555,6 +658,8 @@ async function loadRenderedContent({
     getHistoryLinks: () => renderedDocument.historyLinks,
     getHistoryRow: () => renderedDocument.historyRow,
     getRoot: () => renderedDocument.document.getElementById('chatdock-root'),
+    getModernLayout: () => ({ nav: renderedDocument.nav, scroll: renderedDocument.scroll, utilityGroup: renderedDocument.utilityGroup, sectionsGroup: renderedDocument.sectionsGroup, recentSection: renderedDocument.recentSection }),
+    replaceModernScroll: () => renderedDocument.replaceModernScroll(),
     getPinLink(id) {
       const row = renderedDocument.document.querySelectorAll('.chatdock-row').find((candidate) => candidate.dataset.chatdockPinId === id);
       return row?.querySelector('.chatdock-link') || null;
@@ -1088,6 +1193,147 @@ test('F5 initialization and page-world SPA navigation derive the same final UI',
   await navigated.flushRender();
 
   assert.deepEqual(navigated.getUiSnapshot(), initialized.getUiSnapshot());
+});
+
+test('adds the current Recent title from the new data-thread-title structure', async () => {
+  const harness = await loadContent({
+    recentRows: [makeRecentRow(makeDataThreadTitleAnchor('/c/chat-normal', '既存のチャット名'))],
+    pathname: '/c/chat-normal',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.equal(harness.getStoredPins()[0].title, '既存のチャット名');
+});
+
+test('reads a Project chat data-thread-title without adding the Project name', async () => {
+  const projectAnchor = makeDataThreadTitleAnchor('/g/project123/c/chat456', 'Project内の会話名');
+  const metadata = {
+    textContent: 'Project Alpha',
+    classList: { contains(name) { return name === 'text-token-text-tertiary'; } },
+  };
+  const originalQuerySelectorAll = projectAnchor.querySelectorAll;
+  projectAnchor.querySelectorAll = (selector) => selector === '*'
+    ? [...originalQuerySelectorAll(selector), metadata]
+    : [];
+  const harness = await loadContent({
+    anchors: [projectAnchor],
+    pathname: '/g/project123/c/chat456',
+  });
+
+  assert.equal(await harness.api.addCurrentPin(), true);
+  assert.equal(harness.getStoredPins()[0].title, 'Project内の会話名');
+});
+
+test('syncs the new data-thread-title and retains a saved title while it is empty', async () => {
+  const anchor = makeDataThreadTitleAnchor('/c/chat-normal', '変更後のチャット名');
+  const original = [{ id: 'chat-normal', title: '既存のチャット名', pinnedAt: 10, color: 'blue' }];
+  const harness = await loadContent({ pins: original, recentRows: [makeRecentRow(anchor)] });
+
+  await harness.api.syncOfficialTitles(original, harness.recentSection);
+  assert.equal(harness.getStoredPins()[0].title, '変更後のチャット名');
+
+  anchor.setTitle('');
+  await harness.api.syncOfficialTitles(harness.getStoredPins(), harness.recentSection);
+  assert.equal(harness.getStoredPins()[0].title, '変更後のチャット名');
+});
+
+test('current sidebar places ChatRivet between utility actions and official sections', async () => {
+  const harness = await loadRenderedContent({ modernLayout: true });
+  await harness.flushRender();
+
+  const { nav, scroll, utilityGroup, sectionsGroup, recentSection } = harness.getModernLayout();
+  const root = harness.getRoot();
+  assert.equal(root.parentElement, scroll);
+  assert.deepEqual(scroll.children.map((child) => child === utilityGroup ? 'utility' : child === root ? 'ChatRivet' : child === sectionsGroup ? 'official' : 'other'), ['utility', 'ChatRivet', 'official']);
+  assert.equal(nav.children.includes(root), false);
+  assert.ok(sectionsGroup.contains(recentSection));
+  assert.equal(harness.getUiSnapshot().rootCount, 1);
+});
+
+test('current sidebar keeps the placement with zero official pins, no Projects, or no Recent', async () => {
+  for (const includePinned of [true, false]) {
+    for (const includeProjects of [true, false]) {
+      for (const includeRecent of [true, false]) {
+        const harness = await loadRenderedContent({ modernLayout: true, includePinned, includeProjects, includeRecent });
+        await harness.flushRender();
+        const { scroll, utilityGroup, sectionsGroup } = harness.getModernLayout();
+        assert.deepEqual(scroll.children.map((child) => child === utilityGroup ? 'utility' : child === harness.getRoot() ? 'ChatRivet' : child === sectionsGroup ? 'official' : 'other'), ['utility', 'ChatRivet', 'official']);
+      }
+    }
+  }
+});
+
+test('current sidebar recognizes English section labels without using the hidden rail', async () => {
+  const harness = await loadRenderedContent({ modernLayout: true, locale: 'en' });
+  await harness.flushRender();
+  const { scroll, utilityGroup, sectionsGroup } = harness.getModernLayout();
+  assert.deepEqual(scroll.children.map((child) => child === utilityGroup ? 'utility' : child === harness.getRoot() ? 'ChatRivet' : child === sectionsGroup ? 'official' : 'other'), ['utility', 'ChatRivet', 'official']);
+});
+
+test('current sidebar uses Explore as a safe fallback while official sections are unrendered', async () => {
+  const harness = await loadRenderedContent({ modernLayout: true, includePinned: false, includeProjects: false, includeRecent: false });
+  await harness.flushRender();
+  const { scroll, utilityGroup } = harness.getModernLayout();
+  assert.equal(harness.getRoot().parentElement, scroll);
+  assert.equal(scroll.children.indexOf(harness.getRoot()), scroll.children.indexOf(utilityGroup) + 1);
+});
+
+test('current sidebar uses official sections when Explore is absent and avoids an unanchored mount', async () => {
+  const anchored = await loadRenderedContent({ modernLayout: true, includeExplore: false });
+  await anchored.flushRender();
+  const { scroll, sectionsGroup } = anchored.getModernLayout();
+  assert.equal(anchored.getRoot().parentElement, scroll);
+  assert.equal(anchored.getRoot().nextElementSibling, sectionsGroup);
+
+  const unanchored = await loadRenderedContent({ modernLayout: true, includeExplore: false, includePinned: false, includeProjects: false, includeRecent: false });
+  await unanchored.flushRender();
+  assert.equal(unanchored.getRoot(), null);
+});
+
+test('current sidebar remounts one root after sidebar replacement and SPA navigation', async () => {
+  const harness = await loadRenderedContent({ modernLayout: true, pathname: '/c/chat-a' });
+  await harness.flushRender();
+  harness.navigatePageWorld('/c/chat-b');
+  await harness.flushRender();
+  // Simulate ChatGPT replacing the scroll subtree while keeping the sidebar nav.
+  harness.replaceModernScroll();
+  harness.emitNavMutation();
+  await harness.flushRender();
+  const { scroll, utilityGroup, sectionsGroup } = harness.getModernLayout();
+  assert.deepEqual(scroll.children.map((child) => child === utilityGroup ? 'utility' : child === harness.getRoot() ? 'ChatRivet' : child === sectionsGroup ? 'official' : 'other'), ['utility', 'ChatRivet', 'official']);
+  assert.equal(harness.getUiSnapshot().rootCount, 1);
+});
+
+test('current Recent still drives title sync and official navigation delegation', async () => {
+  const harness = await loadRenderedContent({
+    modernLayout: true,
+    pins: [{ id: 'history-chat', title: 'Old title', pinnedAt: 1 }],
+  });
+  await harness.flushRender();
+  harness.setHistoryTitle('Updated title');
+  harness.emitNavMutation();
+  await harness.flushRender();
+  assert.equal(harness.getStoredPins()[0].title, 'Updated title');
+
+  const click = harness.getPinLink('history-chat').click({ detail: 1, timeStamp: 10 });
+  assert.equal(click.defaultPrevented, true);
+  assert.equal(harness.getHistoryLinks()[0].clickCount, 1);
+});
+
+test('current sidebar still adds and removes a pin through local storage', async () => {
+  const harness = await loadRenderedContent({ modernLayout: true, pathname: '/c/current-chat', historyHref: '/c/current-chat' });
+  await harness.flushRender();
+  harness.clickAdd();
+  await harness.flushMicrotasks();
+  await harness.flushRender();
+  assert.deepEqual(harness.getStoredPins().map(({ id, title }) => ({ id, title })), [
+    { id: 'current-chat', title: 'History chat 1' },
+  ]);
+  assert.equal(harness.getPinLink('current-chat').textContent, 'History chat 1');
+  harness.clickRemove('current-chat');
+  await harness.flushMicrotasks();
+  await harness.flushRender();
+  assert.deepEqual(harness.getStoredPins(), []);
 });
 
 test('does not repaint an old route after a newer route was recognized during storage read', async () => {

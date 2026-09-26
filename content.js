@@ -155,6 +155,8 @@
 
   function findChatHistoryNav() {
     const navs = [...document.querySelectorAll('nav')];
+    const currentSidebar = navs.find((nav) => nav.querySelector('[data-app-action-sidebar-scroll]'));
+    if (currentSidebar) return currentSidebar;
     return navs.find((nav) => /チャット履歴|chat history/i.test(nav.getAttribute('aria-label') || '')) || navs.find((nav) => findOfficialChatLink(nav)) || null;
   }
 
@@ -168,6 +170,33 @@
   function getMountTarget() {
     const nav = findChatHistoryNav();
     if (!nav) return null;
+    const scroll = nav.querySelector('[data-app-action-sidebar-scroll]');
+    if (scroll) {
+      const sections = [...scroll.querySelectorAll('section[data-app-action-sidebar-section]')];
+      const findCurrentSection = (names) => sections.find((section) => {
+        const toggle = section.querySelector('button[data-app-action-sidebar-section-toggle]');
+        return toggle && names.test(normalizeText(toggle.textContent));
+      }) || null;
+      const officialPins = findCurrentSection(/^(ピン留め|pinned)$/i);
+      const projects = findCurrentSection(/^(プロジェクト|projects)$/i);
+      const recent = findCurrentSection(/^(最近|最近の項目|recent|recent items)$/i);
+      const explore = [...scroll.querySelectorAll('button, a')].find((element) => /^(探索|explore)$/i.test(normalizeText(element.textContent))) || null;
+      const topChild = (element) => {
+        while (element?.parentElement && element.parentElement !== scroll) element = element.parentElement;
+        return element?.parentElement === scroll ? element : null;
+      };
+      const utilityGroup = topChild(explore);
+      const officialGroup = topChild(officialPins || projects || recent);
+      if (officialGroup && utilityGroup && [...scroll.children].indexOf(utilityGroup) >= [...scroll.children].indexOf(officialGroup)) return null;
+      if (officialGroup && !utilityGroup && officialGroup === scroll.children[0]) return null;
+      if (!officialGroup && !utilityGroup) return null;
+      let before = officialGroup;
+      if (!before) {
+        before = utilityGroup.nextElementSibling;
+        if (before?.id === ROOT_ID) before = before.nextElementSibling;
+      }
+      return { parent: scroll, before, recentSection: recent };
+    }
     const officialPins = findSectionButton(nav, /^(ピン留め|pinned)$/i);
     const recent = findSectionButton(nav, /^(最近|recent)$/i);
     const findTopLevelSection = (element) => {
@@ -199,6 +228,11 @@
 
   function getOfficialLinkTitle(candidate) {
     const elements = [...candidate.querySelectorAll('*')];
+    const currentTitleElement = elements.find((element) => (
+      element.getAttribute?.('data-thread-title') != null &&
+      normalizeText(element.textContent)
+    ));
+    if (currentTitleElement) return normalizeText(currentTitleElement.textContent).slice(0, TITLE_LIMIT);
     const projectTitleElement = elements.find((element) => (
       element.classList.contains('min-w-0') &&
       element.classList.contains('flex-1') &&
